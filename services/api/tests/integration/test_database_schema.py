@@ -1,138 +1,182 @@
-import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
+from alembic.config import Config
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection, Engine, make_url
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.pool import NullPool
+from sqlalchemy.sql import Executable
+
+from alembic import command
+from app.core.config import Settings
+from app.db.models import (
+    Appeal,
+    AppealFeedback,
+    AppealMessage,
+    AppealParticipant,
+    ApplicantType,
+    MessageAuthorType,
+    StaffRole,
+    StaffUser,
+)
+
 API_ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY_ROOT = API_ROOT.parents[1]
 PHASE_2A_REVISION = "20260909_0002"
 
 
-def _psql(sql: str) -> subprocess.CompletedProcess[str]:
-    """Run psql inside the Compose PostgreSQL service without exposing credentials."""
+def _run_upgrade(connection: Connection) -> None:
+    alembic_config = Config(API_ROOT / "alembic.ini")
+    alembic_config.attributes["connection"] = connection
+    command.upgrade(alembic_config, "head")
 
-    return subprocess.run(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "postgres",
-            "sh",
-            "-c",
-            'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
-        ],
-        cwd=REPOSITORY_ROOT,
-        input=sql,
-        capture_output=True,
-        text=True,
-        check=False,
+
+@pytest.fixture(scope="session")
+def migrated_database_engine() -> Iterator[Engine]:
+    async_url = make_url(Settings().database_url)
+    sync_url = async_url.set(drivername="postgresql+psycopg")
+    engine = create_engine(
+        sync_url, poolclass=NullPool, connect_args={"connect_timeout": 3}
     )
+    with engine.connect() as connection:
+        _run_upgrade(connection)
+    yield engine
+    engine.dispose()
 
 
-def _appeal_insert(appeal_id: UUID, digest_byte: str = "74") -> str:
-    return (
-        "INSERT INTO appeals (id, track_digest, applicant_type) VALUES "
-        f"('{appeal_id}', decode(repeat('{digest_byte}', 32), 'hex'), 'student');"
-    )
+def _expect_integrity_error(connection: Connection, statement: Executable) -> None:
+    savepoint = connection.begin_nested()
+    try:
+        with pytest.raises(IntegrityError):
+            connection.execute(statement)
+    finally:
+        savepoint.rollback()
 
 
-def _staff_insert(staff_id: UUID) -> str:
-    return (
-        "INSERT INTO staff_users (id, login, password_hash, role, display_name) VALUES "
-        f"('{staff_id}', 'expert-{staff_id}', 'unused-phase-2a-hash', "
-        "'expert', 'Integration Expert');"
-    )
-
-
-def test_alembic_upgrade_reaches_phase_2a_revision() -> None:
-    result = _psql("SELECT version_num FROM alembic_version;")
-
-    assert result.returncode == 0, result.stderr
-    assert PHASE_2A_REVISION in result.stdout
-
-
-def test_unique_track_digest_is_enforced() -> None:
-    first_appeal_id = uuid4()
-    second_appeal_id = uuid4()
-    sql = "\n".join(
-        [
-            "BEGIN;",
-            _appeal_insert(first_appeal_id),
-            _appeal_insert(second_appeal_id),
-        ]
-    )
-
-    result = _psql(sql)
-
-    assert result.returncode != 0
-    assert "ix_appeals_track_digest" in result.stderr
-
-
-def test_track_digest_must_be_sha256_length() -> None:
-    sql = (
-        "BEGIN;\n"
-        "INSERT INTO appeals (id, track_digest, applicant_type) VALUES "
-        f"('{uuid4()}', decode('74', 'hex'), 'teacher');"
-    )
-
-    result = _psql(sql)
-
-    assert result.returncode != 0
-    assert "appeals_track_digest_length" in result.stderr
-
-
-def test_rating_and_message_author_checks_are_enforced() -> None:
+def _insert_appeal(connection: Connection, *, digest: bytes = b"t" * 32) -> UUID:
     appeal_id = uuid4()
+    connection.execute(
+        Appeal.__table__.insert().values(
+            id=appeal_id,
+            track_digest=digest,
+            applicant_type=ApplicantType.STUDENT,
+        )
+    )
+    return appeal_id
+
+
+def _insert_staff(connection: Connection) -> UUID:
     staff_id = uuid4()
-    invalid_rating = "\n".join(
-        [
-            "BEGIN;",
-            _appeal_insert(appeal_id, "75"),
-            "INSERT INTO appeal_feedback (id, appeal_id, rating) "
-            f"VALUES ('{uuid4()}', '{appeal_id}', 6);",
-        ]
+    connection.execute(
+        StaffUser.__table__.insert().values(
+            id=staff_id,
+            login=f"expert-{staff_id}",
+            password_hash="unused-phase-2a-hash",
+            role=StaffRole.EXPERT,
+            display_name="Integration Expert",
+        )
     )
-    invalid_message_author = "\n".join(
-        [
-            "BEGIN;",
-            _staff_insert(staff_id),
-            _appeal_insert(appeal_id, "76"),
-            "INSERT INTO appeal_messages "
-            "(id, appeal_id, author_type, author_staff_user_id, encrypted_body, key_version) "
-            f"VALUES ('{uuid4()}', '{appeal_id}', 'applicant', '{staff_id}', "
-            "decode('00', 'hex'), 1);",
-        ]
-    )
-
-    rating_result = _psql(invalid_rating)
-    author_result = _psql(invalid_message_author)
-
-    assert rating_result.returncode != 0
-    assert "appeal_feedback_rating_range" in rating_result.stderr
-    assert author_result.returncode != 0
-    assert "appeal_messages_author_consistency" in author_result.stderr
+    return staff_id
 
 
-def test_only_one_active_primary_participant_is_enforced() -> None:
-    appeal_id = uuid4()
-    first_staff_id = uuid4()
-    second_staff_id = uuid4()
-    sql = "\n".join(
-        [
-            "BEGIN;",
-            _staff_insert(first_staff_id),
-            _staff_insert(second_staff_id),
-            _appeal_insert(appeal_id, "77"),
-            "INSERT INTO appeal_participants "
-            "(id, appeal_id, staff_user_id, participant_role) "
-            f"VALUES ('{uuid4()}', '{appeal_id}', '{first_staff_id}', 'primary');",
-            "INSERT INTO appeal_participants "
-            "(id, appeal_id, staff_user_id, participant_role) "
-            f"VALUES ('{uuid4()}', '{appeal_id}', '{second_staff_id}', 'primary');",
-        ]
-    )
+def test_alembic_upgrade_reaches_phase_2a_revision(
+    migrated_database_engine: Engine,
+) -> None:
+    with migrated_database_engine.connect() as connection:
+        current_revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
+        assert current_revision == PHASE_2A_REVISION
 
-    result = _psql(sql)
 
-    assert result.returncode != 0
-    assert "uq_appeal_participants_current_primary" in result.stderr
+def test_unique_track_digest_is_enforced(migrated_database_engine: Engine) -> None:
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            digest = b"u" * 32
+            _insert_appeal(connection, digest=digest)
+            _expect_integrity_error(
+                connection,
+                Appeal.__table__.insert().values(
+                    id=uuid4(),
+                    track_digest=digest,
+                    applicant_type=ApplicantType.PARENT,
+                ),
+            )
+        finally:
+            transaction.rollback()
+
+
+def test_track_digest_must_be_sha256_length(migrated_database_engine: Engine) -> None:
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            _expect_integrity_error(
+                connection,
+                Appeal.__table__.insert().values(
+                    id=uuid4(),
+                    track_digest=b"short",
+                    applicant_type=ApplicantType.TEACHER,
+                ),
+            )
+        finally:
+            transaction.rollback()
+
+
+def test_rating_and_message_author_checks_are_enforced(
+    migrated_database_engine: Engine,
+) -> None:
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            appeal_id = _insert_appeal(connection, digest=b"v" * 32)
+            staff_id = _insert_staff(connection)
+            _expect_integrity_error(
+                connection,
+                AppealFeedback.__table__.insert().values(
+                    id=uuid4(), appeal_id=appeal_id, rating=6
+                ),
+            )
+            _expect_integrity_error(
+                connection,
+                AppealMessage.__table__.insert().values(
+                    id=uuid4(),
+                    appeal_id=appeal_id,
+                    author_type=MessageAuthorType.APPLICANT,
+                    author_staff_user_id=staff_id,
+                    encrypted_body=b"ciphertext",
+                    key_version=1,
+                ),
+            )
+        finally:
+            transaction.rollback()
+
+
+def test_only_one_active_primary_participant_is_enforced(
+    migrated_database_engine: Engine,
+) -> None:
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            appeal_id = _insert_appeal(connection, digest=b"w" * 32)
+            first_staff_id = _insert_staff(connection)
+            second_staff_id = _insert_staff(connection)
+            connection.execute(
+                AppealParticipant.__table__.insert().values(
+                    id=uuid4(),
+                    appeal_id=appeal_id,
+                    staff_user_id=first_staff_id,
+                    participant_role="primary",
+                )
+            )
+            _expect_integrity_error(
+                connection,
+                AppealParticipant.__table__.insert().values(
+                    id=uuid4(),
+                    appeal_id=appeal_id,
+                    staff_user_id=second_staff_id,
+                    participant_role="primary",
+                ),
+            )
+        finally:
+            transaction.rollback()

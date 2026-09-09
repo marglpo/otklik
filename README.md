@@ -162,9 +162,10 @@ ruff check .
 pytest
 ```
 
-PostgreSQL integration tests require the running Compose `postgres` service and a database at
-the current Alembic head. Constraint probes run in transactions that abort without retaining
-their test rows. Use an isolated Compose project in CI.
+PostgreSQL integration tests use synchronous Psycopg from the development dependency group,
+apply pending migrations to the configured database, and roll back their constraint-test rows.
+The application runtime remains async SQLAlchemy with asyncpg. Use a dedicated database URL in
+CI.
 
 Frontend, from `apps/web`:
 

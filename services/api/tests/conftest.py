@@ -1,17 +1,6 @@
-import faulthandler
-import sys
-
 import pytest
 
 from app.core.config import AppEnvironment, Settings
-
-
-@pytest.hookimpl(trylast=True)
-def pytest_configure() -> None:
-    """Suppress misleading handled-exception reports from Windows native extensions."""
-
-    if sys.platform == "win32":
-        faulthandler.disable()
 
 
 @pytest.fixture
