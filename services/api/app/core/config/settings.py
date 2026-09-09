@@ -50,7 +50,25 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr | None = None
     track_hmac_secret: SecretStr | None = None
     rate_limit_hmac_secret: SecretStr | None = None
+    refresh_token_hmac_secret: SecretStr | None = None
     content_encryption_key: SecretStr | None = None
+
+    jwt_issuer: str = Field(default="otklik-api", min_length=1, max_length=200)
+    jwt_audience: str = Field(default="otklik-staff", min_length=1, max_length=200)
+    access_token_ttl_minutes: int = Field(default=15, ge=1, le=60)
+    refresh_session_ttl_days: int = Field(default=7, ge=1, le=30)
+    refresh_cookie_name: str = Field(
+        default="otklik_staff_refresh", pattern=r"^[A-Za-z0-9_-]+$"
+    )
+    login_rate_limit_attempts: int = Field(default=5, ge=1, le=100)
+    login_rate_limit_window_seconds: int = Field(default=300, ge=1, le=3600)
+
+    demo_operator_login: str = "demo_operator"
+    demo_operator_password: SecretStr | None = None
+    demo_expert_login: str = "demo_expert"
+    demo_expert_password: SecretStr | None = None
+    demo_admin_login: str = "demo_admin"
+    demo_admin_password: SecretStr | None = None
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"]
@@ -80,6 +98,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
+        if "*" in self.cors_origins:
+            raise ValueError("Wildcard CORS origins are forbidden when credentials are enabled")
         if self.app_env is not AppEnvironment.PRODUCTION:
             return self
 
@@ -87,6 +107,7 @@ class Settings(BaseSettings):
             "JWT_SECRET": self.jwt_secret,
             "TRACK_HMAC_SECRET": self.track_hmac_secret,
             "RATE_LIMIT_HMAC_SECRET": self.rate_limit_hmac_secret,
+            "REFRESH_TOKEN_HMAC_SECRET": self.refresh_token_hmac_secret,
             "CONTENT_ENCRYPTION_KEY": self.content_encryption_key,
         }
         missing = [
@@ -96,18 +117,31 @@ class Settings(BaseSettings):
         ]
         if missing:
             raise ValueError(f"Production requires environment variables: {', '.join(missing)}")
+        short_secrets = [
+            name
+            for name, value in secrets.items()
+            if name != "CONTENT_ENCRYPTION_KEY"
+            and value is not None
+            and len(value.get_secret_value().encode("utf-8")) < 32
+        ]
+        if short_secrets:
+            raise ValueError(
+                "Production secrets must be at least 32 bytes: " + ", ".join(short_secrets)
+            )
         from app.core.crypto.encryption import decode_content_encryption_key
 
         encryption_key = self.content_encryption_key
         if encryption_key is not None:
             decode_content_encryption_key(encryption_key.get_secret_value())
-        if "*" in self.cors_origins:
-            raise ValueError("Wildcard CORS origins are forbidden in production")
         return self
 
     @property
     def api_prefix(self) -> str:
         return f"/api/{self.api_version}"
+
+    @property
+    def refresh_cookie_secure(self) -> bool:
+        return self.app_env is AppEnvironment.PRODUCTION
 
 
 @lru_cache

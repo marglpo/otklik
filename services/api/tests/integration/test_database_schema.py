@@ -20,11 +20,12 @@ from app.db.models import (
     ApplicantType,
     MessageAuthorType,
     StaffRole,
+    StaffSession,
     StaffUser,
 )
 
 API_ROOT = Path(__file__).resolve().parents[2]
-PHASE_2A_REVISION = "20260909_0002"
+CURRENT_REVISION = "20260909_0003"
 
 
 def _run_upgrade(connection: Connection) -> None:
@@ -81,12 +82,50 @@ def _insert_staff(connection: Connection) -> UUID:
     return staff_id
 
 
-def test_alembic_upgrade_reaches_phase_2a_revision(
+def test_alembic_upgrade_reaches_current_revision(
     migrated_database_engine: Engine,
 ) -> None:
     with migrated_database_engine.connect() as connection:
         current_revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-        assert current_revision == PHASE_2A_REVISION
+        assert current_revision == CURRENT_REVISION
+
+
+def test_staff_session_digest_constraints_are_enforced(
+    migrated_database_engine: Engine,
+) -> None:
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            staff_id = _insert_staff(connection)
+            digest = b"s" * 32
+            connection.execute(
+                StaffSession.__table__.insert().values(
+                    id=uuid4(),
+                    staff_user_id=staff_id,
+                    refresh_token_digest=digest,
+                    expires_at=text("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+                )
+            )
+            _expect_integrity_error(
+                connection,
+                StaffSession.__table__.insert().values(
+                    id=uuid4(),
+                    staff_user_id=staff_id,
+                    refresh_token_digest=digest,
+                    expires_at=text("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+                ),
+            )
+            _expect_integrity_error(
+                connection,
+                StaffSession.__table__.insert().values(
+                    id=uuid4(),
+                    staff_user_id=staff_id,
+                    refresh_token_digest=b"short",
+                    expires_at=text("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+                ),
+            )
+        finally:
+            transaction.rollback()
 
 
 def test_unique_track_digest_is_enforced(migrated_database_engine: Engine) -> None:

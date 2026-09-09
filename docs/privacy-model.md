@@ -28,8 +28,23 @@ application and calculate `HMAC-SHA256(TRACK_HMAC_SECRET, normalized_track_code)
 a database-only attacker from directly reading track codes; it does not replace rate limits,
 sufficient code entropy, secure delivery, or constant-time authorization behavior.
 
-The separate `RATE_LIMIT_HMAC_SECRET` is reserved for pseudonymizing transient rate-limit
-inputs. Neither HMAC secret is reused as the content-encryption key.
+The separate `RATE_LIMIT_HMAC_SECRET` pseudonymizes transient staff-login IP and normalized
+login inputs before a short-lived Valkey counter is written. Raw IP values are not persisted,
+logged, or associated with appeals. Neither HMAC secret is reused as the content-encryption
+key.
+
+## Internal staff authentication
+
+Staff users are an explicit internal identity boundary and are not applicant identities.
+Passwords are stored only as Argon2 hashes. Short-lived access JWTs remain in browser memory;
+opaque refresh tokens remain in a scoped HttpOnly cookie and are represented in
+`staff_sessions` only by a keyed HMAC-SHA256 digest. Session rows contain no IP address,
+User-Agent, or device fingerprint. Refresh rotation, logout, account deactivation, and password
+changes provide server-side revocation.
+
+Administrative role membership does not imply access to appeal text, applicant-specialist
+chat, or crisis contacts. Future appeal-level authorization must enforce the narrower operator
+triage and expert assignment/participation rules in addition to role checks.
 
 ## Encryption boundary
 

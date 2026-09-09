@@ -25,7 +25,7 @@ from app.db.models.enums import (
     StaffRole,
     TransferRequestStatus,
 )
-from app.db.models.staff import ExpertGroupMembership, ExpertProfile, StaffUser
+from app.db.models.staff import ExpertGroupMembership, ExpertProfile, StaffSession, StaffUser
 from app.db.models.taxonomy import Category, CategoryGroupRule, SpecialistGroup
 
 __all__ = [
@@ -52,6 +52,7 @@ __all__ = [
     "SpecialistGroup",
     "StaffComplaint",
     "StaffRole",
+    "StaffSession",
     "StaffUser",
     "StatusHistory",
     "TransferRequest",

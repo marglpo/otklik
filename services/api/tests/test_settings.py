@@ -13,6 +13,7 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("JWT_SECRET", "test-jwt-value")
     monkeypatch.setenv("TRACK_HMAC_SECRET", "test-track-value")
     monkeypatch.setenv("RATE_LIMIT_HMAC_SECRET", "test-rate-value")
+    monkeypatch.setenv("REFRESH_TOKEN_HMAC_SECRET", "test-refresh-value")
     monkeypatch.setenv("CONTENT_ENCRYPTION_KEY", "test-encryption-value")
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
 
@@ -37,9 +38,10 @@ def test_production_rejects_wildcard_cors() -> None:
         Settings(
             _env_file=None,
             app_env="production",
-            jwt_secret="jwt",
-            track_hmac_secret="track",
-            rate_limit_hmac_secret="rate",
+            jwt_secret="j" * 32,
+            track_hmac_secret="t" * 32,
+            rate_limit_hmac_secret="r" * 32,
+            refresh_token_hmac_secret="f" * 32,
             content_encryption_key=encryption_key,
             cors_origins=["*"],
         )
@@ -50,8 +52,24 @@ def test_production_rejects_invalid_encryption_key() -> None:
         Settings(
             _env_file=None,
             app_env="production",
-            jwt_secret="jwt",
-            track_hmac_secret="track",
-            rate_limit_hmac_secret="rate",
+            jwt_secret="j" * 32,
+            track_hmac_secret="t" * 32,
+            rate_limit_hmac_secret="r" * 32,
+            refresh_token_hmac_secret="f" * 32,
             content_encryption_key=base64.urlsafe_b64encode(b"too-short").decode("ascii"),
+        )
+
+
+def test_production_rejects_short_authentication_secrets() -> None:
+    encryption_key = base64.urlsafe_b64encode(b"k" * 32).decode("ascii")
+
+    with pytest.raises(PydanticValidationError, match="at least 32 bytes"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            jwt_secret="short",
+            track_hmac_secret="t" * 32,
+            rate_limit_hmac_secret="r" * 32,
+            refresh_token_hmac_secret="f" * 32,
+            content_encryption_key=encryption_key,
         )

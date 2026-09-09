@@ -25,7 +25,11 @@ def _sensitive_values(settings: Settings) -> list[str]:
         settings.jwt_secret,
         settings.track_hmac_secret,
         settings.rate_limit_hmac_secret,
+        settings.refresh_token_hmac_secret,
         settings.content_encryption_key,
+        settings.demo_operator_password,
+        settings.demo_expert_password,
+        settings.demo_admin_password,
     ):
         if secret is not None:
             values.append(secret.get_secret_value())
@@ -88,7 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.cors_origins,
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Accept", "Authorization", "Content-Type"],
     )
@@ -98,4 +102,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 app = create_app()
-

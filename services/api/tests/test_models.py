@@ -30,6 +30,7 @@ def test_phase_2a_defines_expected_tables() -> None:
         "internal_notes",
         "specialist_groups",
         "staff_complaints",
+        "staff_sessions",
         "staff_users",
         "status_history",
         "transfer_requests",
@@ -99,3 +100,22 @@ def test_attachments_do_not_store_identifying_filenames_or_public_urls() -> None
     attachment_columns = set(Base.metadata.tables["attachments"].columns.keys())
 
     assert {"original_filename", "filename", "public_url"}.isdisjoint(attachment_columns)
+
+
+def test_staff_sessions_store_no_plaintext_token_or_network_identity() -> None:
+    session_columns = set(Base.metadata.tables["staff_sessions"].columns.keys())
+
+    assert "refresh_token_digest" in session_columns
+    assert {
+        "refresh_token",
+        "ip",
+        "ip_address",
+        "user_agent",
+        "device_fingerprint",
+    }.isdisjoint(session_columns)
+
+
+def test_no_applicant_account_model_exists() -> None:
+    table_names = set(Base.metadata.tables)
+
+    assert {"applicants", "applicant_users", "anonymous_users"}.isdisjoint(table_names)

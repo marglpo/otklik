@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.config import Settings
+from app.modules.auth.router import router as auth_router
 
 
 class BasicHealthResponse(BaseModel):
@@ -32,6 +33,7 @@ class ReadinessResponse(BaseModel):
 
 root_router = APIRouter()
 api_router = APIRouter()
+api_router.include_router(auth_router)
 
 
 @root_router.get("/health", response_model=BasicHealthResponse, tags=["health"])
@@ -95,4 +97,3 @@ async def readiness(request: Request) -> JSONResponse:
         status_code=HTTPStatus.OK if is_ready else HTTPStatus.SERVICE_UNAVAILABLE,
         content=payload.model_dump(),
     )
-

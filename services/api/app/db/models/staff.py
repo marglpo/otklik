@@ -1,10 +1,22 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, String, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.db.models.common import TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.common import CreatedAtMixin, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.models.enums import StaffRole, string_enum
 
 
@@ -59,4 +71,32 @@ class ExpertGroupMembership(UUIDPrimaryKeyMixin, Base):
     )
     specialist_group_id: Mapped[UUID] = mapped_column(
         ForeignKey("specialist_groups.id", ondelete="CASCADE"), nullable=False
+    )
+
+
+class StaffSession(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Revocable staff refresh session; raw refresh tokens are never persisted."""
+
+    __tablename__ = "staff_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "octet_length(refresh_token_digest) = 32",
+            name="staff_sessions_refresh_digest_length",
+        ),
+        CheckConstraint(
+            "rotation_counter >= 0", name="staff_sessions_nonnegative_rotation_counter"
+        ),
+        Index("ix_staff_sessions_refresh_token_digest", "refresh_token_digest", unique=True),
+        Index("ix_staff_sessions_staff_user_id_expires_at", "staff_user_id", "expires_at"),
+    )
+
+    staff_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("staff_users.id", ondelete="CASCADE"), nullable=False
+    )
+    refresh_token_digest: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rotation_counter: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
     )

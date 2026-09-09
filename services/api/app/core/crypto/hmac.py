@@ -22,3 +22,9 @@ def rate_limit_digest(secret: str | bytes, transient_value: str | bytes) -> byte
     """Pseudonymize a transient rate-limit value without persisting the raw value."""
 
     return hmac_sha256(secret, transient_value)
+
+
+def refresh_token_digest(secret: str | bytes, refresh_token: str) -> bytes:
+    """Digest a high-entropy refresh token for server-side session lookup."""
+
+    return hmac_sha256(secret, refresh_token)

@@ -3,7 +3,8 @@ import re
 from collections.abc import Iterable
 
 _SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)\b(password|token|jwt|authorization|secret|encryption_key|contact_data|appeal_content)"
+    r"(?i)\b(password(?:_hash)?|(?:access_|refresh_)?token|jwt|authorization|cookie|"
+    r"set-cookie|secret|encryption_key|contact_data|appeal_content)"
     r"\b(\s*[:=]\s*)([^\r\n,;]+)"
 )
 
@@ -37,4 +38,3 @@ def configure_logging(log_level: str, *, sensitive_values: Iterable[str] = ()) -
 
     # The default Uvicorn access log contains client IP addresses. Otklik does not log them.
     logging.getLogger("uvicorn.access").disabled = True
-

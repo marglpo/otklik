@@ -1,6 +1,6 @@
 # Otklik MVP threat model
 
-This document describes the Phase 2A security assumptions and limits. It is a living
+This document describes the Phase 2B security assumptions and limits. It is a living
 model, not a claim that the current foundation is a complete production system.
 
 ## Assets
@@ -11,7 +11,7 @@ model, not a claim that the current foundation is a complete production system.
 - Optional crisis contact details
 - Attachment contents and metadata
 - Raw track access secrets and their lookup digests
-- Staff credentials and future authenticated sessions
+- Staff credentials and authenticated sessions
 - Security audit records and cryptographic keys
 
 ## Primary threats
@@ -58,14 +58,23 @@ authorization must be enforced even when infrastructure is on a private network.
 - Access logging is disabled and application logging policy forbids request bodies,
   authorization headers, secrets, and sensitive content.
 - Audit metadata is restricted by policy to allowlisted, non-sensitive operational values.
+- Staff passwords use Argon2; short-lived access JWTs are bound to revocable server-side
+  sessions through a session-ID claim.
+- Refresh tokens are high entropy, rotate on use, stay in an HttpOnly cookie, and are stored
+  only as keyed HMAC digests. Session records contain no network or device identity.
+- Staff login attempts use expiring Valkey counters whose IP/login components are HMAC
+  pseudonyms, not raw values.
+- Central role guards distinguish unauthenticated (401) from unauthorized (403) requests, and
+  the policy boundary explicitly denies sensitive content based on admin role alone.
 
 ## MVP limitations
 
-Phase 2A is only a domain, persistence, and cryptographic foundation. Applicant submission,
-track-code generation and lookup, rate limiting, staff authentication, RBAC, attachment
-encryption/storage, audit-write allowlisting, backups, and deployment TLS are not yet
-implemented. The presence of encrypted columns does not mean that a complete key-rotation or
-key-custody process exists.
+Phase 2B adds staff authentication and coarse role authorization, not complete application
+authorization. Applicant submission, track-code generation and lookup, appeal-level access
+queries, attachment encryption/storage, audit-write allowlisting, backups, and deployment TLS
+are not yet implemented. Login rate limiting is backed by Valkey, but deployment proxy controls
+are still required. The presence of encrypted columns does not mean that a complete
+key-rotation or key-custody process exists.
 
 Otklik does **not** claim network-level anonymity. The application is designed not to persist
 or associate client IP addresses or User-Agent values with appeals, but browsers, operating
