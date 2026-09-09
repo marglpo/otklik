@@ -14,17 +14,19 @@ from app.db.models import (
     Appeal,
     AppealContent,
     AppealIntakeAnswer,
+    AppealRejection,
     Category,
     CrisisContact,
     StatusHistory,
 )
-from app.db.models.enums import AppealPriority, AppealStatus, ApplicantType
+from app.db.models.enums import AppealPriority, AppealStatus, ApplicantType, RejectionKind
 from app.db.repositories.public_appeals import AppealWithCategory, PublicAppealRepository
 from app.main import create_app
 from app.modules.appeals.crypto_context import (
     appeal_content_aad,
     crisis_contact_aad,
     intake_answers_aad,
+    rejection_reason_aad,
 )
 from app.modules.appeals.dependencies import (
     get_public_appeal_rate_limiter,
@@ -39,6 +41,8 @@ from app.modules.appeals.track import (
     normalize_track_number,
 )
 from app.modules.categories.reference_data import STARTER_CATEGORIES
+from app.modules.crisis.detector import CrisisRulePattern
+from app.modules.crisis.service import CrisisRuleService
 from app.scripts.seed_reference_data import seed_categories
 
 
@@ -50,6 +54,7 @@ class FakePublicRepository:
         self.answers: dict[UUID, AppealIntakeAnswer] = {}
         self.history: dict[UUID, list[StatusHistory]] = {}
         self.contacts: dict[UUID, CrisisContact] = {}
+        self.rejections: dict[UUID, AppealRejection] = {}
         self.commits = 0
 
     async def list_active_categories(self) -> list[Category]:
@@ -99,6 +104,9 @@ class FakePublicRepository:
 
     async def get_appeal(self, appeal_id: UUID) -> Appeal | None:
         return self.appeals.get(appeal_id)
+
+    async def get_rejection(self, appeal_id: UUID) -> AppealRejection | None:
+        return self.rejections.get(appeal_id)
 
     async def get_appeal_with_category(self, appeal_id: UUID) -> AppealWithCategory | None:
         appeal = self.appeals.get(appeal_id)
@@ -255,6 +263,25 @@ async def test_crisis_detection_does_not_escalate_priority(test_settings) -> Non
     assert result.response.show_crisis_support is True
 
 
+async def test_appeal_creation_uses_loaded_persistent_crisis_rules(test_settings) -> None:
+    class FakeCrisisRules:
+        async def active_patterns(self) -> list[CrisisRulePattern]:
+            return [CrisisRulePattern.from_phrase("маркер только из базы")]
+
+    repository = FakePublicRepository()
+    service = PublicAppealService(
+        cast(PublicAppealRepository, repository),
+        test_settings,
+        cast(CrisisRuleService, FakeCrisisRules()),
+    )
+
+    await service.create_appeal(_payload(description="Есть маркер-только-из-базы"))
+
+    appeal = next(iter(repository.appeals.values()))
+    assert appeal.crisis_flag is True
+    assert appeal.priority is AppealPriority.STANDARD
+
+
 async def test_crisis_contact_is_encrypted_and_isolated(test_settings) -> None:
     service, repository = _service(test_settings)
     await service.create_appeal(_payload(description="Хочу умереть"))
@@ -307,12 +334,34 @@ async def test_current_response_contains_only_applicant_safe_fields(test_setting
         "created_at",
         "updated_at",
         "timeline",
+        "rejection_reason",
     }
     serialized = response.model_dump_json()
     assert all(
         forbidden not in serialized
         for forbidden in ("track_digest", "assigned_expert", "staff_user", "internal_notes")
     )
+
+
+async def test_current_response_decrypts_only_applicant_visible_rejection(test_settings) -> None:
+    service, repository = _service(test_settings)
+    created = await service.create_appeal(_payload(description="Нужна помощь"))
+    appeal_id = service.decode_access_token(created.access_token)
+    repository.appeals[appeal_id].status = AppealStatus.REJECTED
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    repository.rejections[appeal_id] = AppealRejection(
+        appeal_id=appeal_id,
+        kind=RejectionKind.OUTSIDE_COMPETENCE,
+        encrypted_reason=crypto.encrypt_text(
+            "Пожалуйста, обратитесь в профильную службу.",
+            aad=rejection_reason_aad(appeal_id),
+        ),
+        key_version=crypto.key_version,
+    )
+
+    response = await service.current_appeal(appeal_id)
+
+    assert response.rejection_reason == "Пожалуйста, обратитесь в профильную службу."
 
 
 def test_applicant_access_token_cannot_authenticate_as_staff(test_settings) -> None:

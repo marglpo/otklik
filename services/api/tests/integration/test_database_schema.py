@@ -18,6 +18,7 @@ from app.db.models import (
     AppealMessage,
     AppealParticipant,
     ApplicantType,
+    CrisisRule,
     MessageAuthorType,
     StaffRole,
     StaffSession,
@@ -25,7 +26,7 @@ from app.db.models import (
 )
 
 API_ROOT = Path(__file__).resolve().parents[2]
-CURRENT_REVISION = "20260909_0003"
+CURRENT_REVISION = "20260909_0004"
 
 
 def _run_upgrade(connection: Connection) -> None:
@@ -216,6 +217,45 @@ def test_only_one_active_primary_participant_is_enforced(
                     staff_user_id=second_staff_id,
                     participant_role="primary",
                 ),
+            )
+        finally:
+            transaction.rollback()
+
+
+def test_crisis_rule_uniqueness_and_rejection_constraints(
+    migrated_database_engine: Engine,
+) -> None:
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            values = {
+                "phrase": "не хочу жить",
+                "normalized_phrase": "не хочу жить",
+                "compact_phrase": "нехочужить",
+                "allow_compact_match": True,
+            }
+            connection.execute(CrisisRule.__table__.insert().values(id=uuid4(), **values))
+            _expect_integrity_error(
+                connection,
+                CrisisRule.__table__.insert().values(id=uuid4(), **values),
+            )
+            _expect_integrity_error(
+                connection,
+                CrisisRule.__table__.insert().values(
+                    id=uuid4(),
+                    phrase="empty normalized form",
+                    normalized_phrase="",
+                    compact_phrase="",
+                ),
+            )
+            appeal_id = _insert_appeal(connection, digest=b"z" * 32)
+            _expect_integrity_error(
+                connection,
+                text(
+                    "INSERT INTO appeal_rejections "
+                    "(appeal_id, kind, encrypted_reason, key_version) "
+                    "VALUES (:appeal_id, 'unsupported', :reason, 1)"
+                ).bindparams(appeal_id=appeal_id, reason=b"ciphertext"),
             )
         finally:
             transaction.rollback()

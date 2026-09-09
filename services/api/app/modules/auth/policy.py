@@ -13,6 +13,18 @@ from app.db.models.enums import StaffRole
 
 class AccessPolicy:
     @staticmethod
+    def operator_may_triage(role: StaffRole) -> bool:
+        return role is StaffRole.OPERATOR
+
+    @staticmethod
+    def operator_may_read_triage_content(role: StaffRole) -> bool:
+        return role is StaffRole.OPERATOR
+
+    @staticmethod
+    def operator_may_read_crisis_contact(role: StaffRole) -> bool:
+        return role is StaffRole.OPERATOR
+
+    @staticmethod
     def can_manage_staff(role: StaffRole) -> bool:
         return role is StaffRole.ADMIN
 

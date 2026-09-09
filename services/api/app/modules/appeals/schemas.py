@@ -99,6 +99,7 @@ class CurrentAppealResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     timeline: list[StatusTimelineItem]
+    rejection_reason: str | None = None
 
 
 class CrisisContactRequest(BaseModel):

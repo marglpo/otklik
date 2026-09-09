@@ -26,6 +26,7 @@ from app.modules.appeals.crypto_context import (
     appeal_content_aad,
     crisis_contact_aad,
     intake_answers_aad,
+    rejection_reason_aad,
 )
 from app.modules.appeals.schemas import (
     AppealCreatedResponse,
@@ -44,6 +45,7 @@ from app.modules.categories.reference_data import (
     UNKNOWN_CATEGORY_SLUG,
 )
 from app.modules.crisis.detector import CrisisDetector
+from app.modules.crisis.service import CrisisRuleService
 
 INVALID_TRACK_MESSAGE = "The track number is invalid or unavailable."
 _INVALID_TRACK_PLACEHOLDER = "ОТК-2222-2222"
@@ -66,7 +68,7 @@ class PublicAppealService:
         self,
         repository: PublicAppealRepository,
         settings: Settings,
-        crisis_detector: CrisisDetector | None = None,
+        crisis_rule_service: CrisisRuleService | None = None,
     ) -> None:
         content_key = settings.content_encryption_key
         track_secret = settings.track_hmac_secret
@@ -79,7 +81,7 @@ class PublicAppealService:
         self._crypto = ContentCrypto(content_key.get_secret_value())
         self._track_secret = track_secret.get_secret_value()
         self._access_tokens = AppealAccessTokenService(settings)
-        self._crisis_detector = crisis_detector or CrisisDetector()
+        self._crisis_rules = crisis_rule_service
 
     async def public_reference(self) -> PublicReferenceResponse:
         categories = await self._repository.list_active_categories()
@@ -116,7 +118,11 @@ class PublicAppealService:
         if category is None and not description:
             raise ValidationError("Choose a category or describe the situation.")
 
-        crisis_flag = self._crisis_detector.detect([description, *intake_answers.values()])
+        patterns = (
+            await self._crisis_rules.active_patterns() if self._crisis_rules is not None else None
+        )
+        detector = CrisisDetector(patterns) if patterns is not None else CrisisDetector()
+        crisis_flag = detector.detect([description, *intake_answers.values()])
         for _attempt in range(5):
             track_number = generate_track_number()
             track_digest = track_lookup_digest(self._track_secret, track_number)
@@ -209,6 +215,11 @@ class PublicAppealService:
             raise UnauthorizedError("Appeal access is invalid or expired.")
         appeal = record.appeal
         history = await self._repository.list_status_history(appeal_id)
+        rejection = (
+            await self._repository.get_rejection(appeal_id)
+            if appeal.status is AppealStatus.REJECTED
+            else None
+        )
         return CurrentAppealResponse(
             applicant_type=appeal.applicant_type,
             category=self._category_public(record.category) if record.category else None,
@@ -227,6 +238,13 @@ class PublicAppealService:
                 )
                 for item in history
             ],
+            rejection_reason=(
+                self._crypto.decrypt_text(
+                    rejection.encrypted_reason, aad=rejection_reason_aad(appeal_id)
+                )
+                if rejection
+                else None
+            ),
         )
 
     async def save_crisis_contact(self, appeal_id: UUID, contact: str) -> None:

@@ -1,5 +1,219 @@
-import { ProtectedStaffPage } from "@/components/auth/protected-staff-page"
+"use client"
 
-export default function OperatorPlaceholderPage() {
-  return <ProtectedStaffPage requiredRole="operator" title="Operator workspace" />
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
+
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { useAuth } from "@/lib/auth"
+import {
+  type AppealPriority,
+  type OperatorAppealDetail,
+  type OperatorQueue,
+  type OperatorReference,
+  operatorApi,
+} from "@/lib/operator"
+
+const priorities: Record<AppealPriority, string> = {
+  low: "Низкий",
+  standard: "Обычный",
+  urgent: "Срочный",
+}
+
+const applicantTypes = {
+  student: "Ученик",
+  parent: "Родитель",
+  teacher: "Педагог",
+} as const
+
+const statuses: Record<string, string> = {
+  new: "Новое",
+  assigned: "Назначено",
+  returned: "Возвращено",
+  rejected: "Отклонено",
+}
+
+const intakeLabels: Record<string, string> = {
+  where: "Где это происходит?",
+  duration: "Как давно это происходит?",
+  involved: "Кто участвует?",
+  help_requested: "Обращались ли уже за помощью?",
+}
+
+function waiting(seconds: number) {
+  const hours = Math.floor(seconds / 3600)
+  if (hours < 1) return `${Math.max(1, Math.floor(seconds / 60))} мин.`
+  return hours < 24 ? `${hours} ч.` : `${Math.floor(hours / 24)} дн.`
+}
+
+export default function OperatorWorkspacePage() {
+  const router = useRouter()
+  const { staff, status, request, logout } = useAuth()
+  const [queue, setQueue] = useState<OperatorQueue | null>(null)
+  const [reference, setReference] = useState<OperatorReference | null>(null)
+  const [detail, setDetail] = useState<OperatorAppealDetail | null>(null)
+  const [statusFilter, setStatusFilter] = useState("")
+  const [priorityFilter, setPriorityFilter] = useState("")
+  const [crisisOnly, setCrisisOnly] = useState(false)
+  const [rejectReason, setRejectReason] = useState("")
+  const [rejectKind, setRejectKind] = useState<"spam" | "outside_competence">("spam")
+  const [selectedExpertId, setSelectedExpertId] = useState("")
+  const [crisisContact, setCrisisContact] = useState<string | null>(null)
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (status === "anonymous") router.replace("/staff/login")
+    if (status === "authenticated" && staff?.role !== "operator") {
+      router.replace(`/staff/${staff?.role}`)
+    }
+  }, [router, staff, status])
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams()
+    if (statusFilter) params.set("status", statusFilter)
+    if (priorityFilter) params.set("priority", priorityFilter)
+    if (crisisOnly) params.set("crisis", "true")
+    return params.size ? `?${params}` : ""
+  }, [crisisOnly, priorityFilter, statusFilter])
+
+  const loadQueue = useCallback(async () => {
+    setQueue(await operatorApi.queue(request, query))
+  }, [query, request])
+
+  const loadDetail = useCallback(
+    async (id: string) => {
+      setError("")
+      setCrisisContact(null)
+      try {
+        const loaded = await operatorApi.detail(request, id)
+        setDetail(loaded)
+        setSelectedExpertId(loaded.routing.recommended_expert?.expert_id ?? "")
+      } catch {
+        setError("Не удалось открыть обращение.")
+      }
+    },
+    [request]
+  )
+
+  useEffect(() => {
+    if (status !== "authenticated" || staff?.role !== "operator") return
+    const timer = window.setTimeout(() => {
+      void Promise.all([
+        loadQueue(),
+        operatorApi.reference(request).then(setReference),
+      ]).catch(() => setError("Не удалось загрузить очередь оператора."))
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadQueue, request, staff, status])
+
+  async function mutate(action: () => Promise<unknown>) {
+    if (!detail) return
+    setBusy(true)
+    setError("")
+    try {
+      await action()
+      await loadQueue()
+      await loadDetail(detail.id)
+    } catch {
+      setError("Действие не выполнено. Проверьте состояние обращения и выбранные данные.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function openAttachment(id: string) {
+    if (!detail) return
+    try {
+      const blob = await operatorApi.attachment(request, detail.id, id)
+      const url = URL.createObjectURL(blob)
+      window.open(url, "_blank", "noopener,noreferrer")
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch {
+      setError("Не удалось открыть вложение.")
+    }
+  }
+
+  if (status === "checking") {
+    return <main className="m-auto p-6 text-sm text-slate-500">Проверяем сессию…</main>
+  }
+  if (status !== "authenticated" || staff?.role !== "operator") return null
+
+  const crisisItems = queue?.items.filter((item) => item.crisis_flag) ?? []
+  const regularItems = queue?.items.filter((item) => !item.crisis_flag) ?? []
+
+  return (
+    <main className="min-h-screen bg-slate-100 text-slate-950">
+      <header className="border-b bg-white px-4 py-4 sm:px-6">
+        <div className="mx-auto flex max-w-7xl items-center justify-between">
+          <div><p className="text-sm font-semibold text-teal-700">Отклик</p><h1 className="text-xl font-semibold">Рабочее место оператора</h1></div>
+          <Button variant="outline" onClick={() => void logout().finally(() => router.replace("/staff/login"))}>Выйти</Button>
+        </div>
+      </header>
+
+      <div className="mx-auto grid max-w-7xl gap-5 p-4 sm:p-6 lg:grid-cols-[360px_1fr]">
+        <aside className="space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            {queue ? ([
+              ["Требуют внимания", queue.counters.crisis, "bg-amber-50"],
+              ["Новые", queue.counters.new, "bg-white"],
+              ["Возвращённые", queue.counters.returned, "bg-white"],
+              ["Просроченные", queue.counters.overdue, "bg-white"],
+            ] as const).map(([label, value, style]) => (
+              <div key={label} className={`rounded-xl p-3 ring-1 ring-slate-200 ${style}`}><p className="text-2xl font-semibold">{value}</p><p className="text-xs">{label}</p></div>
+            )) : null}
+          </div>
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+            <select aria-label="Статус" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-lg border p-2 text-sm">
+              <option value="">Новые и возвращённые</option><option value="new">Новые</option><option value="returned">Возвращённые</option>
+            </select>
+            <select aria-label="Приоритет" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)} className="rounded-lg border p-2 text-sm">
+              <option value="">Все приоритеты</option><option value="urgent">Срочный</option><option value="standard">Обычный</option><option value="low">Низкий</option>
+            </select>
+            <label className="col-span-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={crisisOnly} onChange={(event) => setCrisisOnly(event.target.checked)} /> Только требующие внимания</label>
+          </div>
+          <QueueBlock title="Требуют внимания" items={crisisItems} selectedId={detail?.id} onOpen={loadDetail} />
+          <QueueBlock title="Очередь" items={regularItems} selectedId={detail?.id} onOpen={loadDetail} />
+        </aside>
+
+        <section className="min-w-0">
+          {error ? <p className="mb-4 rounded-xl bg-rose-50 p-4 text-sm text-rose-800">{error}</p> : null}
+          {!detail ? <div className="rounded-2xl bg-white p-10 text-center text-slate-500 ring-1 ring-slate-200">Выберите обращение в очереди.</div> : (
+            <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+              <div className="space-y-5">
+                <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+                  <div className="flex flex-wrap gap-2 text-xs"><span>{applicantTypes[detail.applicant_type]}</span><span>{statuses[detail.status] ?? detail.status}</span><span>ожидает {waiting(detail.waiting_seconds)}</span>{detail.crisis_flag ? <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-900">Требует внимания</span> : null}</div>
+                  <h2 className="mt-5 text-lg font-semibold">Описание ситуации</h2><p className="mt-3 whitespace-pre-wrap leading-7 text-slate-700">{detail.description || "Описание не добавлено."}</p>
+                </section>
+                {Object.keys(detail.intake_answers).length ? <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Дополнительные ответы</h2><dl className="mt-4 space-y-3">{Object.entries(detail.intake_answers).map(([key, value]) => <div key={key}><dt className="text-xs text-slate-500">{intakeLabels[key] ?? key}</dt><dd className="mt-1 text-sm">{value}</dd></div>)}</dl></section> : null}
+                <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Вложения</h2><div className="mt-3 flex flex-wrap gap-2">{detail.attachments.length ? detail.attachments.map((item, index) => <Button key={item.id} variant="outline" onClick={() => openAttachment(item.id)}>Открыть изображение {index + 1}</Button>) : <p className="text-sm text-slate-500">Вложений нет.</p>}</div></section>
+              </div>
+
+              <aside className="space-y-4">
+                <section className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+                  <h2 className="font-semibold">Триаж и маршрутизация</h2>
+                  <label className="block text-sm"><span className="mb-1 block text-slate-600">Категория</span><select value={detail.category?.id ?? ""} disabled={busy} onChange={(event) => void mutate(() => operatorApi.triage(request, detail.id, { category_id: event.target.value }))} className="w-full rounded-lg border p-2"><option value="" disabled>Выберите</option>{reference?.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+                  <label className="block text-sm"><span className="mb-1 block text-slate-600">Приоритет</span><select value={detail.priority} disabled={busy} onChange={(event) => void mutate(() => operatorApi.triage(request, detail.id, { priority: event.target.value as AppealPriority }))} className="w-full rounded-lg border p-2">{Object.entries(priorities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <div className="rounded-xl bg-slate-50 p-3 text-sm"><p className="font-medium">Рекомендация</p><p className="mt-1 text-slate-600">{detail.routing.reason}</p>{detail.routing.recommended_expert ? <p className="mt-2">{detail.routing.recommended_expert.display_name}: {detail.routing.recommended_expert.current_load}/{detail.routing.recommended_expert.capacity}</p> : null}</div>
+                  <select aria-label="Эксперт" className="w-full rounded-lg border p-2 text-sm" value={selectedExpertId} onChange={(event) => setSelectedExpertId(event.target.value)}><option value="" disabled>Выберите эксперта</option>{detail.routing.candidates.map((candidate) => <option key={candidate.expert_id} value={candidate.expert_id} disabled={!candidate.available}>{candidate.display_name} — {candidate.current_load}/{candidate.capacity}</option>)}</select>
+                  <Button className="w-full" disabled={busy || !selectedExpertId || !detail.routing.candidates.some((candidate) => candidate.expert_id === selectedExpertId && candidate.available)} onClick={() => void mutate(() => operatorApi.assign(request, detail.id, selectedExpertId))}>Назначить эксперта</Button>
+                </section>
+                {detail.crisis_flag ? <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5"><h2 className="font-semibold">Кризисный контакт</h2>{crisisContact ? <p className="mt-3 break-words rounded-lg bg-white p-3 text-sm">{crisisContact}</p> : <Button className="mt-3" variant="outline" onClick={async () => { try { setCrisisContact((await operatorApi.crisisContact(request, detail.id)).contact) } catch { setError("Контакт не указан или недоступен.") } }}>Показать отдельно</Button>}</section> : null}
+                <section className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+                  <h2 className="font-semibold">Отклонить обращение</h2><select value={rejectKind} onChange={(event) => setRejectKind(event.target.value as typeof rejectKind)} className="w-full rounded-lg border p-2 text-sm"><option value="spam">Спам</option><option value="outside_competence">Вне компетенции</option></select>
+                  <Textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="Понятное заявителю объяснение" maxLength={2000} />
+                  <Button variant="destructive" className="w-full" disabled={busy || !rejectReason.trim()} onClick={() => void mutate(async () => { await operatorApi.reject(request, detail.id, rejectKind, rejectReason); setRejectReason("") })}>Отклонить</Button>
+                </section>
+              </aside>
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
+  )
+}
+
+function QueueBlock({ title, items, selectedId, onOpen }: { title: string; items: OperatorQueue["items"]; selectedId?: string; onOpen: (id: string) => Promise<void> }) {
+  if (!items.length) return null
+  return <section className="space-y-2"><h2 className="text-sm font-semibold text-slate-600">{title}</h2>{items.map((item) => <button key={item.id} type="button" onClick={() => void onOpen(item.id)} className={`w-full rounded-xl p-4 text-left ring-1 ${selectedId === item.id ? "bg-teal-50 ring-teal-500" : "bg-white ring-slate-200"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium">{item.category?.name ?? "Категория не выбрана"}</span><span className="text-xs text-slate-500">{waiting(item.waiting_seconds)}</span></div><div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600"><span>{applicantTypes[item.applicant_type]}</span><span>{statuses[item.status] ?? item.status}</span><span>{priorities[item.priority]}</span>{item.is_overdue ? <span className="text-rose-700">Просрочено</span> : null}</div></button>)}</section>
 }

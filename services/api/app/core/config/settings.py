@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     track_access_rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
     appeal_submission_rate_limit_attempts: int = Field(default=10, ge=1, le=100)
     appeal_submission_rate_limit_window_seconds: int = Field(default=3600, ge=60, le=86400)
+    operator_overdue_hours: int = Field(default=24, ge=1, le=720)
 
     attachment_storage_path: Path = Path("var/private/attachments")
     attachment_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)

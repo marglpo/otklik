@@ -1,6 +1,6 @@
 # Otklik MVP threat model
 
-This document describes the Phase 3 security assumptions and limits. It is a living
+This document describes the Phase 4 security assumptions and limits. It is a living
 model, not a claim that the current foundation is a complete production system.
 
 ## Assets
@@ -63,6 +63,12 @@ authorization must be enforced even when infrastructure is on a private network.
   transient network address.
 - Crisis matching stores only a boolean and does not automatically escalate priority; support
   contacts remain organizer-controlled configuration.
+- Crisis rules are database-backed literal metadata with deterministic normalization; no
+  administrator-supplied regex or executable pattern is evaluated.
+- Operator content DTOs omit chat, internal notes, track material, and crisis contacts. Admin
+  role does not inherit operator triage access.
+- Assignment/status/category/priority actions, rejections, and crisis-contact reads use
+  allowlisted audit metadata without sensitive free text.
 - Access logging is disabled and application logging policy forbids request bodies,
   authorization headers, secrets, and sensitive content.
 - Audit metadata is restricted by policy to allowlisted, non-sensitive operational values.
@@ -77,9 +83,9 @@ authorization must be enforced even when infrastructure is on a private network.
 
 ## MVP limitations
 
-Phase 3 adds anonymous submission and appeal-scoped status access, not staff appeal workflows
-or complete application authorization. There is no applicant-specialist chat API, staff
-attachment retrieval, malware scanner, storage retention lifecycle, audit-write allowlisting,
+Phase 4 adds operator triage and deterministic recommendation, not expert workflows or complete
+application authorization. There is no applicant-specialist chat API, expert attachment
+retrieval, crisis-rule admin UI, malware scanner, storage retention lifecycle,
 backup policy, or deployment TLS configuration. Phrase-based crisis detection can miss novel
 wording and can produce false positives; it is not a clinical assessment. Crisis-help contacts
 must be approved by organizers before production. Valkey rate limits reduce straightforward

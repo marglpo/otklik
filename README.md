@@ -1,9 +1,10 @@
 # Otklik
 
 Otklik is a privacy-first anonymous case-management platform for trusted appeals. The
-repository is currently at **Phase 3: anonymous applicant MVP**. Anonymous creation, safe
-status access, crisis signalling, and encrypted image upload are implemented. Operator and
-expert workflows, administration features, analytics, and machine learning are not.
+repository is currently at **Phase 4: operator workflow and deterministic routing**. Anonymous
+creation, safe status access, staff authentication, operator triage, persistent crisis rules,
+and encrypted image handling are implemented. Expert workflows, administration UI, analytics,
+and machine learning are not.
 
 ## Architecture
 
@@ -15,7 +16,8 @@ services:
 - `services/api`: Python 3.12 FastAPI application with async SQLAlchemy, Alembic, an async
   Redis-compatible Valkey client, canonical persistence models under `app/db/models`, and
   small cryptographic primitives under `app/core`, staff authentication under
-  `app/modules/auth`, and the anonymous flow under `app/modules/appeals`.
+  `app/modules/auth`, the anonymous flow under `app/modules/appeals`, and operator/routing
+  boundaries under `app/modules/operator` and `app/modules/routing`.
 - PostgreSQL 17 with pgvector 0.8.6.
 - Valkey 8.1.
 
@@ -65,6 +67,7 @@ The API reads the following environment variables:
 | `ATTACHMENT_STORAGE_PATH` | Private encrypted-blob directory |
 | `ATTACHMENT_MAX_BYTES` | Input bytes per attachment; defaults to 10 MiB |
 | `CRISIS_SUPPORT_*` | Organizer-approved public crisis panel copy/contact configuration |
+| `OPERATOR_OVERDUE_HOURS` | Derived queue overdue threshold; defaults to 24 hours |
 | `LOG_LEVEL` | Python log level; defaults to `INFO` |
 | `CORS_ORIGINS` | Comma-separated origins or a JSON array |
 
@@ -166,6 +169,37 @@ and re-encoded without EXIF/geolocation metadata. Up to five 10 MiB inputs are a
 Encrypted blobs live in private storage under opaque extensionless keys. PostgreSQL stores no
 original filename or public URL, and its SHA-256 digest covers the encrypted blob.
 
+## Operator workflow and routing
+
+Only an authenticated user whose role is exactly `operator` can use `/api/v1/operator`.
+Administrators do not inherit triage-content access. The paginated queue defaults to new and
+returned appeals, supports operational filters, and orders crisis attention first, urgent
+priority second, and oldest waiting time third. Waiting and overdue values are derived rather
+than persisted.
+
+Operator detail decrypts only original content and intake answers inside the authorized
+service path. Its explicit DTO contains no track material, crisis contact, applicant-specialist
+chat, or internal notes. Category and priority changes use allowlisted audit metadata.
+Assignment validates expert role, active state, eligible specialist-group membership, current
+load, capacity, and status transition, then atomically updates participants and histories.
+Rejection explanations are applicant-visible content and are AES-GCM encrypted separately
+instead of being placed in audit or status-history free text.
+
+Routing follows `category -> eligible groups -> active experts -> active workload -> capacity`.
+The lowest load/capacity ratio is recommended with deterministic tie-breaking. Missing
+eligibility and full-capacity states are explicit, and recommendation never assigns.
+
+Crisis phrases are database rows, never administrator-supplied regex. Submission loads the
+active small ruleset once and applies Unicode/case/`ё` normalization, punctuation and hyphen
+separation, whitespace collapse, and token-boundary literal matching. Compact matching is an
+explicit per-rule setting. Run `python -m app.scripts.seed_reference_data` after migration to
+create missing defaults idempotently; matching existing rows are not overwritten or
+reactivated. Phase 6 will expose administrator CRUD for crisis rules.
+
+Crisis contact and attachment bytes use separate operator-only `no-store` endpoints. Contact
+reads are audited without the value. Attachments are integrity-checked and decrypted without
+revealing storage paths, storage keys, or original filenames.
+
 ## Staff authentication
 
 Staff authentication exists only for operator, expert, and administrator accounts. Anonymous
@@ -184,8 +218,9 @@ session for the staff member. Central dependencies keep authentication (401) sep
 role authorization (403). Role alone never grants access to sensitive appeal content; future
 appeal-level policies must also evaluate assignment, participation, and workflow state.
 
-The minimal `/staff/login` page redirects authenticated users to role-specific protected
-placeholders. Those pages intentionally contain no workflow functionality.
+The minimal `/staff/login` page redirects authenticated users by role. The operator route now
+hosts the Phase 4 triage workspace; expert and administrator routes remain protected
+placeholders with no workflow functionality.
 
 ### Demo staff seed
 
@@ -220,23 +255,25 @@ applicant account or applicant identity table.
 - Appeal text, intake answers, chat messages, internal notes, feedback comments, and
   complaints have encrypted binary fields. AES-256-GCM envelopes include key version 1 and
   use a new nonce for every encryption.
-- Optional crisis contact data is isolated in `crisis_contacts` for a future operator-only
-  policy. Internal notes are isolated from applicant chat for the same reason.
+- Optional crisis contact data is isolated in `crisis_contacts` and can be decrypted only by
+  the dedicated operator endpoint. Internal notes are isolated from applicant chat for the
+  same reason.
 - Attachments keep an opaque storage key, sanitized MIME type, encrypted blob size, and digest—never an original
   filename or public URL.
 - Audit `reason` and `metadata_json` must never contain sensitive text, contact data,
   credentials, tokens, raw track numbers, or encryption keys.
 
 Phase 2B adds only `staff_sessions`. Session rows contain digests and lifecycle timestamps,
-never raw refresh tokens, IP addresses, User-Agent values, or device fingerprints. Phase 3
-uses the existing Phase 2A appeal tables and introduces no new table or migration.
+never raw refresh tokens, IP addresses, User-Agent values, or device fingerprints. Phase 4
+adds `crisis_rules` and encrypted `appeal_rejections` while reusing the Phase 2A routing,
+participant, history, attachment, and audit tables.
 
 ## Migrations
 
 Alembic uses the same `DATABASE_URL` setting as the application. Revision `20260909_0001`
 enables pgvector; revision `20260909_0002` creates the Phase 2A schema without seed users or
-sensitive sample data; revision `20260909_0003` adds revocable staff sessions. Phase 3 requires
-no schema revision:
+sensitive sample data; revision `20260909_0003` adds revocable staff sessions; revision
+`20260909_0004` adds persistent crisis rules and encrypted rejection explanations:
 
 ```powershell
 cd services/api

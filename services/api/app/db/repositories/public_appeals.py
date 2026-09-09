@@ -8,6 +8,7 @@ from app.db.models import (
     Appeal,
     AppealContent,
     AppealIntakeAnswer,
+    AppealRejection,
     Attachment,
     Category,
     CrisisContact,
@@ -69,6 +70,9 @@ class PublicAppealRepository:
 
     async def get_appeal(self, appeal_id: UUID) -> Appeal | None:
         return await self._session.get(Appeal, appeal_id)
+
+    async def get_rejection(self, appeal_id: UUID) -> AppealRejection | None:
+        return await self._session.get(AppealRejection, appeal_id)
 
     async def get_appeal_with_category(self, appeal_id: UUID) -> AppealWithCategory | None:
         result = await self._session.execute(

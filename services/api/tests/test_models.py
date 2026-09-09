@@ -6,6 +6,7 @@ from app.db.models.enums import (
     AppealStatus,
     ApplicantType,
     MessageAuthorType,
+    RejectionKind,
     StaffRole,
     TransferRequestStatus,
 )
@@ -18,6 +19,7 @@ def test_phase_2a_defines_expected_tables() -> None:
         "appeal_intake_answers",
         "appeal_messages",
         "appeal_participants",
+        "appeal_rejections",
         "appeals",
         "assignment_history",
         "attachments",
@@ -25,6 +27,7 @@ def test_phase_2a_defines_expected_tables() -> None:
         "categories",
         "category_group_rules",
         "crisis_contacts",
+        "crisis_rules",
         "expert_group_memberships",
         "expert_profiles",
         "internal_notes",
@@ -46,6 +49,7 @@ def test_domain_enums_use_stable_lowercase_values() -> None:
         AppealParticipantRole,
         TransferRequestStatus,
         MessageAuthorType,
+        RejectionKind,
     )
 
     for enum_class in enum_classes:

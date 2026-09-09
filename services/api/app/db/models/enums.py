@@ -49,6 +49,11 @@ class MessageAuthorType(StrEnum):
     SPECIALIST = "specialist"
 
 
+class RejectionKind(StrEnum):
+    SPAM = "spam"
+    OUTSIDE_COMPETENCE = "outside_competence"
+
+
 def string_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:
     """Build a portable VARCHAR-backed enum with stable lowercase values."""
 

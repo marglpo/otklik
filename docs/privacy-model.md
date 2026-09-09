@@ -13,7 +13,8 @@ single encrypted payload in `appeal_intake_answers`. Applicant/specialist chat a
 staff notes are separate encrypted tables so future authorization cannot confuse the two.
 
 The optional crisis contact is the only explicit contact-data exception. It is encrypted in
-the isolated `crisis_contacts` table and is intended for future operator-only access. It must
+the isolated `crisis_contacts` table and is available only through a separately authorized,
+audited operator endpoint. It must
 not be copied into appeal metadata, appeal text, logs, audit metadata, or routing history.
 
 Feedback comments and complaints are encrypted because free text can contain identifying
@@ -53,7 +54,8 @@ triage and expert assignment/participation rules in addition to role checks.
 
 Sensitive fields use AES-256-GCM with a fresh 96-bit random nonce for every encryption. The
 binary envelope contains a key-version byte, nonce, and authenticated ciphertext/tag.
-Additional Authenticated Data binds Phase 3 content, answers, crisis contacts, and attachments
+Additional Authenticated Data binds content, answers, crisis contacts, rejection explanations,
+and attachments
 to their record context. Key version 1 is supported now; a key management and rotation workflow is not yet
 implemented.
 
@@ -79,6 +81,18 @@ metadata, and priority remains `standard` until a human changes it. The public h
 non-blocking and its contact resources are configuration that organizers must approve before
 production. An explicitly supplied crisis contact reduces anonymity and is encrypted only in
 the isolated `crisis_contacts` table.
+
+Phase 4 crisis detection loads active literal phrases from `crisis_rules`. Rules are
+administrator-managed metadata, never applicant content, and cannot contain executable regex.
+Normalization handles Unicode compatibility, case, `ё`/`е`, punctuation, hyphens, and repeated
+whitespace. Compact matching is an explicit per-rule choice. Matching retains only the appeal's
+boolean crisis flag, never the matched phrase. Phase 6 will add administrator CRUD.
+
+Operator serializers explicitly enumerate triage fields and omit chat and internal notes.
+Administrator role alone does not grant this access. Applicant-visible rejection explanations
+are encrypted separately; the text is absent from audit metadata and status-history reasons.
+Attachment retrieval verifies the encrypted-blob digest and reveals no private storage path,
+storage key, or original filename.
 
 Audit records may contain allowlisted operational metadata only. Audit `reason` and
 `metadata_json` must never contain appeal or chat text, internal notes, crisis contacts,

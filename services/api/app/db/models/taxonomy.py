@@ -66,3 +66,37 @@ class CategoryGroupRule(UUIDPrimaryKeyMixin, Base):
     specialist_group_id: Mapped[UUID] = mapped_column(
         ForeignKey("specialist_groups.id", ondelete="CASCADE"), nullable=False
     )
+
+
+class CrisisRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Administrator-managed literal phrase; executable patterns are forbidden."""
+
+    __tablename__ = "crisis_rules"
+    __table_args__ = (
+        UniqueConstraint("normalized_phrase", name="crisis_rules_normalized_phrase"),
+        CheckConstraint("phrase = btrim(phrase)", name="crisis_rules_phrase_trimmed"),
+        CheckConstraint(
+            "normalized_phrase = btrim(normalized_phrase)", name="crisis_rules_normalized_trimmed"
+        ),
+        CheckConstraint(
+            "compact_phrase = btrim(compact_phrase)", name="crisis_rules_compact_trimmed"
+        ),
+        CheckConstraint(
+            "char_length(normalized_phrase) > 0", name="crisis_rules_normalized_nonempty"
+        ),
+        CheckConstraint("char_length(compact_phrase) > 0", name="crisis_rules_compact_nonempty"),
+        CheckConstraint("sort_order >= 0", name="crisis_rules_nonnegative_sort_order"),
+    )
+
+    phrase: Mapped[str] = mapped_column(String(300), nullable=False)
+    normalized_phrase: Mapped[str] = mapped_column(String(300), nullable=False)
+    compact_phrase: Mapped[str] = mapped_column(String(300), nullable=False)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    allow_compact_match: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )

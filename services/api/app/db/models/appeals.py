@@ -27,6 +27,7 @@ from app.db.models.enums import (
     AppealStatus,
     ApplicantType,
     MessageAuthorType,
+    RejectionKind,
     TransferRequestStatus,
     string_enum,
 )
@@ -119,6 +120,24 @@ class AppealIntakeAnswer(TimestampMixin, Base):
     key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
 
 
+class AppealRejection(TimestampMixin, Base):
+    """Encrypted applicant-visible rejection explanation, separate from audit data."""
+
+    __tablename__ = "appeal_rejections"
+    __table_args__ = (
+        CheckConstraint("key_version > 0", name="appeal_rejections_positive_key_version"),
+    )
+
+    appeal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("appeals.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[RejectionKind] = mapped_column(
+        string_enum(RejectionKind, name="rejection_kind"), nullable=False
+    )
+    encrypted_reason: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+
 class AppealMessage(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "appeal_messages"
     __table_args__ = (
@@ -162,7 +181,7 @@ class InternalNote(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
 
 class CrisisContact(TimestampMixin, Base):
-    """Encrypted crisis contact isolated for future operator-only authorization."""
+    """Encrypted crisis contact isolated behind dedicated operator authorization."""
 
     __tablename__ = "crisis_contacts"
     __table_args__ = (

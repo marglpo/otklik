@@ -10,6 +10,7 @@ type ApiErrorEnvelope = {
 export type ApiRequestOptions = Omit<RequestInit, "body"> & {
   json?: unknown
   body?: BodyInit
+  responseType?: "json" | "blob"
 }
 
 export class ApiError extends Error {
@@ -32,12 +33,18 @@ export class ApiClient {
       throw new Error("API paths must be relative to the configured base URL")
     }
 
-    const { headers: suppliedHeaders, json, body, ...requestOptions } = options
+    const {
+      headers: suppliedHeaders,
+      json,
+      body,
+      responseType = "json",
+      ...requestOptions
+    } = options
     if (json !== undefined && body !== undefined) {
       throw new Error("API requests cannot include both JSON and a raw body")
     }
     const headers = new Headers(suppliedHeaders)
-    headers.set("Accept", "application/json")
+    headers.set("Accept", responseType === "blob" ? "image/*" : "application/json")
     if (json !== undefined) {
       headers.set("Content-Type", "application/json")
     }
@@ -54,6 +61,10 @@ export class ApiClient {
         throw new ApiError(response.status, "http_error", response.statusText)
       }
       return undefined as T
+    }
+
+    if (response.ok && responseType === "blob") {
+      return (await response.blob()) as T
     }
 
     const responseText = await response.text()

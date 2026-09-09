@@ -52,6 +52,7 @@ export type CurrentAppeal = {
   created_at: string
   updated_at: string
   timeline: Array<{ status: string; text: string; occurred_at: string }>
+  rejection_reason: string | null
 }
 
 export type CreateAppealInput = {

@@ -7,6 +7,7 @@ from app.db.models.appeals import (
     AppealIntakeAnswer,
     AppealMessage,
     AppealParticipant,
+    AppealRejection,
     AssignmentHistory,
     Attachment,
     CrisisContact,
@@ -22,11 +23,12 @@ from app.db.models.enums import (
     AppealStatus,
     ApplicantType,
     MessageAuthorType,
+    RejectionKind,
     StaffRole,
     TransferRequestStatus,
 )
 from app.db.models.staff import ExpertGroupMembership, ExpertProfile, StaffSession, StaffUser
-from app.db.models.taxonomy import Category, CategoryGroupRule, SpecialistGroup
+from app.db.models.taxonomy import Category, CategoryGroupRule, CrisisRule, SpecialistGroup
 
 __all__ = [
     "Appeal",
@@ -37,6 +39,7 @@ __all__ = [
     "AppealParticipant",
     "AppealParticipantRole",
     "AppealPriority",
+    "AppealRejection",
     "AppealStatus",
     "ApplicantType",
     "AssignmentHistory",
@@ -45,10 +48,12 @@ __all__ = [
     "Category",
     "CategoryGroupRule",
     "CrisisContact",
+    "CrisisRule",
     "ExpertGroupMembership",
     "ExpertProfile",
     "InternalNote",
     "MessageAuthorType",
+    "RejectionKind",
     "SpecialistGroup",
     "StaffComplaint",
     "StaffRole",

@@ -63,6 +63,11 @@ export default function CurrentAppealPage() {
               <p className="mt-2 text-xs text-slate-500">
                 Обновлено {new Date(appeal.updated_at).toLocaleString("ru-RU")}
               </p>
+              {appeal.rejection_reason ? (
+                <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                  {appeal.rejection_reason}
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">

@@ -7,11 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import UnauthorizedError
+from app.db.repositories.crisis_rules import CrisisRuleRepository
 from app.db.repositories.public_appeals import PublicAppealRepository
 from app.db.session import get_db_session
 from app.modules.appeals.rate_limit import PublicAppealRateLimiter
 from app.modules.appeals.service import PublicAppealService
 from app.modules.attachments.service import AttachmentService
+from app.modules.crisis.service import CrisisRuleService
 
 
 def get_public_appeal_service(
@@ -19,7 +21,11 @@ def get_public_appeal_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> PublicAppealService:
     settings = cast(Settings, request.app.state.settings)
-    return PublicAppealService(PublicAppealRepository(session), settings)
+    return PublicAppealService(
+        PublicAppealRepository(session),
+        settings,
+        CrisisRuleService(CrisisRuleRepository(session)),
+    )
 
 
 def get_public_appeal_rate_limiter(request: Request) -> PublicAppealRateLimiter:

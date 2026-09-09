@@ -15,3 +15,7 @@ def crisis_contact_aad(appeal_id: UUID) -> bytes:
 
 def attachment_aad(appeal_id: UUID, attachment_id: UUID) -> bytes:
     return b"otklik:attachment:" + appeal_id.bytes + attachment_id.bytes
+
+
+def rejection_reason_aad(appeal_id: UUID) -> bytes:
+    return b"otklik:appeal-rejection:" + appeal_id.bytes

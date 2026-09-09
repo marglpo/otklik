@@ -34,6 +34,12 @@ class PrivateAttachmentStorage:
         except OSError as exc:
             raise InfrastructureError("Private attachment cleanup failed.") from exc
 
+    def read(self, key: str) -> bytes:
+        try:
+            return self._target(key).read_bytes()
+        except OSError as exc:
+            raise InfrastructureError("Private attachment storage is unavailable.") from exc
+
     def _target(self, key: str) -> Path:
         if _STORAGE_KEY_PATTERN.fullmatch(key) is None:
             raise ValueError("Invalid attachment storage key")
