@@ -1,0 +1,2 @@
+"""Staff module placeholder."""
+

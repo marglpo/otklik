@@ -1,0 +1,2 @@
+"""Attachments module placeholder."""
+

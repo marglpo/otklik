@@ -1,0 +1,2 @@
+"""Categories module placeholder."""
+
