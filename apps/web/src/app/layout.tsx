@@ -17,14 +17,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Otklik",
-  description: "Privacy-first foundation for trusted anonymous appeals",
+  title: "Отклик — анонимное обращение",
+  description: "Конфиденциальная платформа для анонимных доверенных обращений",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="ru"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">

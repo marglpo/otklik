@@ -8,7 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN addgroup --system --gid 10001 otklik \
-    && adduser --system --uid 10001 --ingroup otklik --no-create-home otklik
+    && adduser --system --uid 10001 --ingroup otklik --no-create-home otklik \
+    && mkdir -p /var/lib/otklik/attachments \
+    && chown -R otklik:otklik /var/lib/otklik
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt

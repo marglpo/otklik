@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.config import Settings
+from app.modules.appeals.router import router as public_appeals_router
 from app.modules.auth.router import router as auth_router
 
 
@@ -34,6 +35,7 @@ class ReadinessResponse(BaseModel):
 root_router = APIRouter()
 api_router = APIRouter()
 api_router.include_router(auth_router)
+api_router.include_router(public_appeals_router)
 
 
 @root_router.get("/health", response_model=BasicHealthResponse, tags=["health"])

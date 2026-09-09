@@ -9,6 +9,7 @@ type ApiErrorEnvelope = {
 
 export type ApiRequestOptions = Omit<RequestInit, "body"> & {
   json?: unknown
+  body?: BodyInit
 }
 
 export class ApiError extends Error {
@@ -31,7 +32,10 @@ export class ApiClient {
       throw new Error("API paths must be relative to the configured base URL")
     }
 
-    const { headers: suppliedHeaders, json, ...requestOptions } = options
+    const { headers: suppliedHeaders, json, body, ...requestOptions } = options
+    if (json !== undefined && body !== undefined) {
+      throw new Error("API requests cannot include both JSON and a raw body")
+    }
     const headers = new Headers(suppliedHeaders)
     headers.set("Accept", "application/json")
     if (json !== undefined) {
@@ -42,7 +46,7 @@ export class ApiClient {
     const response = await fetch(`${this.baseUrl}/${normalizedPath}`, {
       ...requestOptions,
       headers,
-      body: json === undefined ? undefined : JSON.stringify(json),
+      body: json === undefined ? body : JSON.stringify(json),
     })
 
     if (response.status === 204) {
@@ -86,4 +90,3 @@ export class ApiClient {
 }
 
 export const apiClient = new ApiClient(runtimeConfig.apiBaseUrl)
-

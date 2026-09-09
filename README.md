@@ -1,9 +1,9 @@
 # Otklik
 
-Otklik is intended to become a privacy-first anonymous case-management platform for
-trusted appeals. The repository is currently at **Phase 2B: internal staff authentication,
-secure sessions, and RBAC foundation**. Applicant submission and lookup APIs, operational
-workflows, administration features, analytics, and machine learning are not implemented.
+Otklik is a privacy-first anonymous case-management platform for trusted appeals. The
+repository is currently at **Phase 3: anonymous applicant MVP**. Anonymous creation, safe
+status access, crisis signalling, and encrypted image upload are implemented. Operator and
+expert workflows, administration features, analytics, and machine learning are not.
 
 ## Architecture
 
@@ -14,13 +14,13 @@ services:
   shadcn/ui, a native-fetch API client, and TanStack Query.
 - `services/api`: Python 3.12 FastAPI application with async SQLAlchemy, Alembic, an async
   Redis-compatible Valkey client, canonical persistence models under `app/db/models`, and
-  small cryptographic primitives under `app/core`, and internal staff authentication under
-  `app/modules/auth`.
+  small cryptographic primitives under `app/core`, staff authentication under
+  `app/modules/auth`, and the anonymous flow under `app/modules/appeals`.
 - PostgreSQL 17 with pgvector 0.8.6.
 - Valkey 8.1.
 
 Future business HTTP schemas and services remain boundaries under `services/api/app/modules`.
-Only staff authentication is populated in this phase. See [Privacy model](docs/privacy-model.md)
+Feature services stay deliberately small and persistence remains under `app/db`. See [Privacy model](docs/privacy-model.md)
 and [MVP threat model](docs/threat-model.md) for the security assumptions and limitations.
 
 ## Prerequisites
@@ -46,19 +46,29 @@ The API reads the following environment variables:
 | `DATABASE_URL` | Async SQLAlchemy PostgreSQL URL |
 | `VALKEY_URL` | Redis-compatible Valkey URL |
 | `JWT_SECRET` | HMAC secret used to sign short-lived staff access JWTs |
-| `TRACK_HMAC_SECRET` | HMAC key reserved for future deterministic track-code lookup |
-| `RATE_LIMIT_HMAC_SECRET` | HMAC key for transient staff-login rate-limit identifiers |
+| `TRACK_HMAC_SECRET` | HMAC key for deterministic track-number lookup |
+| `RATE_LIMIT_HMAC_SECRET` | HMAC key for transient staff/public rate-limit identifiers |
 | `REFRESH_TOKEN_HMAC_SECRET` | Separate HMAC key for server-side refresh-token digests |
+| `APPLICANT_ACCESS_JWT_SECRET` | Separate signing secret for temporary appeal-scoped access cookies |
 | `CONTENT_ENCRYPTION_KEY` | URL-safe base64 encoding of exactly 32 random bytes for AES-256-GCM |
 | `ACCESS_TOKEN_TTL_MINUTES` | Staff access-token lifetime; defaults to 15 minutes |
 | `REFRESH_SESSION_TTL_DAYS` | Staff refresh-session lifetime; defaults to 7 days |
 | `REFRESH_COOKIE_NAME` | Refresh-cookie name; defaults to `otklik_staff_refresh` |
 | `LOGIN_RATE_LIMIT_ATTEMPTS` | Attempts allowed per transient login/IP digest window |
 | `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | Valkey counter TTL; defaults to 300 seconds |
+| `APPLICANT_ACCESS_TTL_MINUTES` | Appeal capability lifetime; defaults to 30 minutes |
+| `APPLICANT_ACCESS_COOKIE_NAME` | Appeal capability cookie name |
+| `TRACK_ACCESS_RATE_LIMIT_ATTEMPTS` | Track checks per transient network window; defaults to 5 |
+| `TRACK_ACCESS_RATE_LIMIT_WINDOW_SECONDS` | Track-check counter TTL; defaults to 60 seconds |
+| `APPEAL_SUBMISSION_RATE_LIMIT_ATTEMPTS` | Submissions per transient network window; defaults to 10 |
+| `APPEAL_SUBMISSION_RATE_LIMIT_WINDOW_SECONDS` | Submission counter TTL; defaults to one hour |
+| `ATTACHMENT_STORAGE_PATH` | Private encrypted-blob directory |
+| `ATTACHMENT_MAX_BYTES` | Input bytes per attachment; defaults to 10 MiB |
+| `CRISIS_SUPPORT_*` | Organizer-approved public crisis panel copy/contact configuration |
 | `LOG_LEVEL` | Python log level; defaults to `INFO` |
 | `CORS_ORIGINS` | Comma-separated origins or a JSON array |
 
-All five secret variables are required when `APP_ENV=production`; signing/HMAC secrets must be
+All six secret variables are required when `APP_ENV=production`; signing/HMAC secrets must be
 at least 32 bytes, and the content key is validated at startup in that environment. They remain optional in development and testing
 until the related service is constructed. Wildcard CORS is always rejected because credentialed
 requests are enabled. Generate a
@@ -125,6 +135,37 @@ cache. A separate client auth provider keeps the access token in memory only and
 through the scoped HttpOnly refresh cookie. Nothing is written to `localStorage` or
 `sessionStorage`.
 
+## Anonymous applicant flow
+
+The public UI at `/` supports student, parent, and teacher submissions without an applicant
+account. `GET /api/v1/public/reference` provides active seeded categories and four optional,
+application-defined intake questions. Seed the Russian starter categories idempotently from
+`services/api`:
+
+```powershell
+python -m app.scripts.seed_reference_data
+```
+
+`POST /api/v1/public/appeals` accepts JSON metadata and sensitive text, stores the text and
+answers in separate AES-GCM ciphertext records, and returns a one-time visible number in the
+format `ОТК-XXXX-XXXX`. Only its deterministic HMAC-SHA256 digest is stored. The response also
+sets a short-lived, appeal-scoped, signed HttpOnly cookie. A later
+`POST /api/v1/public/appeals/access` verifies a supplied number and establishes a new temporary
+capability; the number is never put in a URL or browser storage. `GET .../current` returns only
+applicant-safe status data, while `POST .../leave` clears the capability cookie.
+
+Deterministic, auditable crisis phrase detection checks description and optional answers in
+memory. It sets `crisis_flag` but never changes priority to urgent. The support panel is
+non-blocking. Any phone or URL in `CRISIS_SUPPORT_*` must be approved by organizers before
+production. On a crisis appeal, the optional contact endpoint encrypts contact data into the
+isolated `crisis_contacts` table; declining it never affects submission.
+
+Images are uploaded only after creation. JPEG, PNG, and WEBP inputs are magic-byte checked,
+decoded with Pillow, bounded by pixel count, orientation-corrected, reconstructed from pixels,
+and re-encoded without EXIF/geolocation metadata. Up to five 10 MiB inputs are accepted.
+Encrypted blobs live in private storage under opaque extensionless keys. PostgreSQL stores no
+original filename or public URL, and its SHA-256 digest covers the encrypted blob.
+
 ## Staff authentication
 
 Staff authentication exists only for operator, expert, and administrator accounts. Anonymous
@@ -181,20 +222,21 @@ applicant account or applicant identity table.
   use a new nonce for every encryption.
 - Optional crisis contact data is isolated in `crisis_contacts` for a future operator-only
   policy. Internal notes are isolated from applicant chat for the same reason.
-- Attachments keep an opaque storage key, MIME type, size, and digest—never an original
+- Attachments keep an opaque storage key, sanitized MIME type, encrypted blob size, and digest—never an original
   filename or public URL.
 - Audit `reason` and `metadata_json` must never contain sensitive text, contact data,
   credentials, tokens, raw track numbers, or encryption keys.
 
 Phase 2B adds only `staff_sessions`. Session rows contain digests and lifecycle timestamps,
-never raw refresh tokens, IP addresses, User-Agent values, or device fingerprints. No business
-endpoint currently reads or writes appeal entities.
+never raw refresh tokens, IP addresses, User-Agent values, or device fingerprints. Phase 3
+uses the existing Phase 2A appeal tables and introduces no new table or migration.
 
 ## Migrations
 
 Alembic uses the same `DATABASE_URL` setting as the application. Revision `20260909_0001`
 enables pgvector; revision `20260909_0002` creates the Phase 2A schema without seed users or
-sensitive sample data; revision `20260909_0003` adds revocable staff sessions:
+sensitive sample data; revision `20260909_0003` adds revocable staff sessions. Phase 3 requires
+no schema revision:
 
 ```powershell
 cd services/api

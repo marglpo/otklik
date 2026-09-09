@@ -4,8 +4,10 @@ from app.core.errors.exceptions import (
     ForbiddenError,
     InfrastructureError,
     NotFoundError,
+    PayloadTooLargeError,
     RateLimitError,
     UnauthorizedError,
+    UnsupportedMediaTypeError,
     ValidationError,
 )
 
@@ -15,8 +17,9 @@ __all__ = [
     "ForbiddenError",
     "InfrastructureError",
     "NotFoundError",
+    "PayloadTooLargeError",
     "RateLimitError",
     "UnauthorizedError",
+    "UnsupportedMediaTypeError",
     "ValidationError",
 ]
-

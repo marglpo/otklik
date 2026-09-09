@@ -14,6 +14,7 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("TRACK_HMAC_SECRET", "test-track-value")
     monkeypatch.setenv("RATE_LIMIT_HMAC_SECRET", "test-rate-value")
     monkeypatch.setenv("REFRESH_TOKEN_HMAC_SECRET", "test-refresh-value")
+    monkeypatch.setenv("APPLICANT_ACCESS_JWT_SECRET", "test-applicant-access-value")
     monkeypatch.setenv("CONTENT_ENCRYPTION_KEY", "test-encryption-value")
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
 
@@ -24,6 +25,11 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert settings.valkey_url == "redis://cache:6379/0"
     assert settings.jwt_secret is not None
     assert settings.jwt_secret.get_secret_value() == "test-jwt-value"
+    assert settings.applicant_access_jwt_secret is not None
+    assert (
+        settings.applicant_access_jwt_secret.get_secret_value()
+        == "test-applicant-access-value"
+    )
     assert settings.cors_origins == ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
@@ -42,6 +48,7 @@ def test_production_rejects_wildcard_cors() -> None:
             track_hmac_secret="t" * 32,
             rate_limit_hmac_secret="r" * 32,
             refresh_token_hmac_secret="f" * 32,
+            applicant_access_jwt_secret="a" * 32,
             content_encryption_key=encryption_key,
             cors_origins=["*"],
         )
@@ -56,6 +63,7 @@ def test_production_rejects_invalid_encryption_key() -> None:
             track_hmac_secret="t" * 32,
             rate_limit_hmac_secret="r" * 32,
             refresh_token_hmac_secret="f" * 32,
+            applicant_access_jwt_secret="a" * 32,
             content_encryption_key=base64.urlsafe_b64encode(b"too-short").decode("ascii"),
         )
 
@@ -71,5 +79,16 @@ def test_production_rejects_short_authentication_secrets() -> None:
             track_hmac_secret="t" * 32,
             rate_limit_hmac_secret="r" * 32,
             refresh_token_hmac_secret="f" * 32,
+            applicant_access_jwt_secret="a" * 32,
             content_encryption_key=encryption_key,
+        )
+
+
+def test_applicant_access_secret_must_be_separate() -> None:
+    shared_secret = "s" * 32
+    with pytest.raises(PydanticValidationError, match="must not reuse"):
+        Settings(
+            _env_file=None,
+            jwt_secret=shared_secret,
+            applicant_access_jwt_secret=shared_secret,
         )

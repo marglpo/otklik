@@ -22,16 +22,19 @@ service validation must prevent sensitive applicant content from being copied in
 
 ## Anonymous track access
 
-No raw track number is stored. Future lookup will normalize a presented track code in the
-application and calculate `HMAC-SHA256(TRACK_HMAC_SECRET, normalized_track_code)`. Only the
+No raw track number is stored. Lookup normalizes a presented `ОТК-XXXX-XXXX` code in the
+application and calculates `HMAC-SHA256(TRACK_HMAC_SECRET, normalized_track_code)`. Only the
 32-byte digest is indexed in PostgreSQL. HMAC provides deterministic lookup while preventing
-a database-only attacker from directly reading track codes; it does not replace rate limits,
+a database-only attacker from directly reading track codes. Ambiguous characters are excluded
+from generated codes. A successful check creates a separate, signed, short-lived HttpOnly
+cookie scoped to one appeal; it is not an applicant identity and is not accepted as staff
+authentication. This does not replace rate limits,
 sufficient code entropy, secure delivery, or constant-time authorization behavior.
 
-The separate `RATE_LIMIT_HMAC_SECRET` pseudonymizes transient staff-login IP and normalized
-login inputs before a short-lived Valkey counter is written. Raw IP values are not persisted,
-logged, or associated with appeals. Neither HMAC secret is reused as the content-encryption
-key.
+The separate `RATE_LIMIT_HMAC_SECRET` pseudonymizes transient IP inputs before short-lived
+Valkey counters are written for staff login, track checks, and submission. Raw IP values are
+not persisted, logged, or associated with appeals. Neither HMAC secret is reused as the
+content-encryption key.
 
 ## Internal staff authentication
 
@@ -49,9 +52,9 @@ triage and expert assignment/participation rules in addition to role checks.
 ## Encryption boundary
 
 Sensitive fields use AES-256-GCM with a fresh 96-bit random nonce for every encryption. The
-binary envelope contains a key-version byte, nonce, and authenticated ciphertext/tag. Optional
-Additional Authenticated Data can bind ciphertext to contextual identifiers in future service
-logic. Key version 1 is supported now; a key management and rotation workflow is not yet
+binary envelope contains a key-version byte, nonce, and authenticated ciphertext/tag.
+Additional Authenticated Data binds Phase 3 content, answers, crisis contacts, and attachments
+to their record context. Key version 1 is supported now; a key management and rotation workflow is not yet
 implemented.
 
 `CONTENT_ENCRYPTION_KEY` is a URL-safe base64 encoding of exactly 32 random bytes. It remains
@@ -61,9 +64,21 @@ is actively handling it.
 
 ## Attachments and audit records
 
-Attachment records use opaque storage keys and SHA-256 content digests. Original filenames
-and public URLs are forbidden because filenames commonly contain personal data. File bytes,
-file encryption, metadata stripping, malware scanning, and upload APIs are future work.
+Attachment records use opaque storage keys and SHA-256 digests. Original filenames and public
+URLs are forbidden because filenames commonly contain personal data. Accepted JPEG, PNG, and
+WEBP files are decoded, dimension-bounded, orientation-corrected, and re-encoded from pixels so
+EXIF/geolocation and unnecessary metadata are removed. Sanitized bytes are AES-GCM encrypted
+into private filesystem storage. The stored digest and byte size describe the encrypted blob.
+Malware scanning is not yet implemented.
+
+## Crisis handling
+
+Crisis detection is conservative phrase matching over plaintext already in memory for
+submission. Only a boolean flag is retained; matched phrases are not logged or stored as new
+metadata, and priority remains `standard` until a human changes it. The public help panel is
+non-blocking and its contact resources are configuration that organizers must approve before
+production. An explicitly supplied crisis contact reduces anonymity and is encrypted only in
+the isolated `crisis_contacts` table.
 
 Audit records may contain allowlisted operational metadata only. Audit `reason` and
 `metadata_json` must never contain appeal or chat text, internal notes, crisis contacts,

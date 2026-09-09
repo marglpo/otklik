@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     track_hmac_secret: SecretStr | None = None
     rate_limit_hmac_secret: SecretStr | None = None
     refresh_token_hmac_secret: SecretStr | None = None
+    applicant_access_jwt_secret: SecretStr | None = None
     content_encryption_key: SecretStr | None = None
 
     jwt_issuer: str = Field(default="otklik-api", min_length=1, max_length=200)
@@ -62,6 +63,38 @@ class Settings(BaseSettings):
     )
     login_rate_limit_attempts: int = Field(default=5, ge=1, le=100)
     login_rate_limit_window_seconds: int = Field(default=300, ge=1, le=3600)
+
+    applicant_access_jwt_issuer: str = Field(default="otklik-api", min_length=1, max_length=200)
+    applicant_access_jwt_audience: str = Field(
+        default="otklik-appeal-access", min_length=1, max_length=200
+    )
+    applicant_access_ttl_minutes: int = Field(default=30, ge=5, le=120)
+    applicant_access_cookie_name: str = Field(
+        default="otklik_appeal_access", pattern=r"^[A-Za-z0-9_-]+$"
+    )
+    track_access_rate_limit_attempts: int = Field(default=5, ge=1, le=100)
+    track_access_rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
+    appeal_submission_rate_limit_attempts: int = Field(default=10, ge=1, le=100)
+    appeal_submission_rate_limit_window_seconds: int = Field(default=3600, ge=60, le=86400)
+
+    attachment_storage_path: Path = Path("var/private/attachments")
+    attachment_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
+    attachment_max_count: int = Field(default=5, ge=1, le=10)
+    attachment_max_pixels: int = Field(default=40_000_000, ge=1_000_000, le=100_000_000)
+    crisis_support_title: str = Field(
+        default="Помощь в экстренной ситуации", min_length=1, max_length=120
+    )
+    crisis_support_message: str = Field(
+        default=(
+            "Если прямо сейчас есть угроза жизни или безопасности, обратитесь в местную "
+            "экстренную службу или к взрослому, которому доверяете."
+        ),
+        min_length=1,
+        max_length=500,
+    )
+    crisis_support_phone: str | None = Field(default=None, max_length=60)
+    crisis_support_url: str | None = Field(default=None, max_length=500)
+    crisis_support_requires_organizer_verification: bool = True
 
     demo_operator_login: str = "demo_operator"
     demo_operator_password: SecretStr | None = None
@@ -100,6 +133,24 @@ class Settings(BaseSettings):
     def validate_production_settings(self) -> "Settings":
         if "*" in self.cors_origins:
             raise ValueError("Wildcard CORS origins are forbidden when credentials are enabled")
+        applicant_secret = self.applicant_access_jwt_secret
+        if applicant_secret is not None:
+            applicant_secret_value = applicant_secret.get_secret_value()
+            forbidden_reuse = {
+                secret.get_secret_value()
+                for secret in (
+                    self.jwt_secret,
+                    self.track_hmac_secret,
+                    self.rate_limit_hmac_secret,
+                    self.refresh_token_hmac_secret,
+                    self.content_encryption_key,
+                )
+                if secret is not None
+            }
+            if applicant_secret_value in forbidden_reuse:
+                raise ValueError(
+                    "Applicant access JWT secret must not reuse any other application secret"
+                )
         if self.app_env is not AppEnvironment.PRODUCTION:
             return self
 
@@ -108,6 +159,7 @@ class Settings(BaseSettings):
             "TRACK_HMAC_SECRET": self.track_hmac_secret,
             "RATE_LIMIT_HMAC_SECRET": self.rate_limit_hmac_secret,
             "REFRESH_TOKEN_HMAC_SECRET": self.refresh_token_hmac_secret,
+            "APPLICANT_ACCESS_JWT_SECRET": self.applicant_access_jwt_secret,
             "CONTENT_ENCRYPTION_KEY": self.content_encryption_key,
         }
         missing = [
@@ -141,6 +193,10 @@ class Settings(BaseSettings):
 
     @property
     def refresh_cookie_secure(self) -> bool:
+        return self.app_env is AppEnvironment.PRODUCTION
+
+    @property
+    def applicant_access_cookie_secure(self) -> bool:
         return self.app_env is AppEnvironment.PRODUCTION
 
 

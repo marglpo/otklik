@@ -263,6 +263,7 @@ async def test_production_refresh_cookie_is_secure(test_settings: Settings) -> N
         track_hmac_secret="t" * 64,
         rate_limit_hmac_secret="r" * 64,
         refresh_token_hmac_secret="f" * 64,
+        applicant_access_jwt_secret="a" * 64,
         content_encryption_key=encryption_key,
         cors_origins=["https://staff.example.test"],
     )

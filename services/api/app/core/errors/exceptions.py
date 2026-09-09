@@ -53,6 +53,18 @@ class RateLimitError(AppError):
     default_message = "Too many requests."
 
 
+class PayloadTooLargeError(AppError):
+    status_code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+    code = "payload_too_large"
+    default_message = "The submitted payload is too large."
+
+
+class UnsupportedMediaTypeError(AppError):
+    status_code = HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+    code = "unsupported_media_type"
+    default_message = "The submitted media type is not supported."
+
+
 class InfrastructureError(AppError):
     status_code = HTTPStatus.SERVICE_UNAVAILABLE
     code = "infrastructure_unavailable"

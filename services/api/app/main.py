@@ -26,6 +26,7 @@ def _sensitive_values(settings: Settings) -> list[str]:
         settings.track_hmac_secret,
         settings.rate_limit_hmac_secret,
         settings.refresh_token_hmac_secret,
+        settings.applicant_access_jwt_secret,
         settings.content_encryption_key,
         settings.demo_operator_password,
         settings.demo_expert_password,
