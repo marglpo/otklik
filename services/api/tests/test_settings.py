@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
@@ -30,6 +32,7 @@ def test_production_rejects_missing_secrets() -> None:
 
 
 def test_production_rejects_wildcard_cors() -> None:
+    encryption_key = base64.urlsafe_b64encode(b"k" * 32).decode("ascii")
     with pytest.raises(PydanticValidationError, match="Wildcard CORS origins"):
         Settings(
             _env_file=None,
@@ -37,7 +40,18 @@ def test_production_rejects_wildcard_cors() -> None:
             jwt_secret="jwt",
             track_hmac_secret="track",
             rate_limit_hmac_secret="rate",
-            content_encryption_key="encryption",
+            content_encryption_key=encryption_key,
             cors_origins=["*"],
         )
 
+
+def test_production_rejects_invalid_encryption_key() -> None:
+    with pytest.raises(PydanticValidationError, match="exactly 32 bytes"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            jwt_secret="jwt",
+            track_hmac_secret="track",
+            rate_limit_hmac_secret="rate",
+            content_encryption_key=base64.urlsafe_b64encode(b"too-short").decode("ascii"),
+        )

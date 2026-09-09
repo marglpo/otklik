@@ -96,6 +96,11 @@ class Settings(BaseSettings):
         ]
         if missing:
             raise ValueError(f"Production requires environment variables: {', '.join(missing)}")
+        from app.core.crypto.encryption import decode_content_encryption_key
+
+        encryption_key = self.content_encryption_key
+        if encryption_key is not None:
+            decode_content_encryption_key(encryption_key.get_secret_value())
         if "*" in self.cors_origins:
             raise ValueError("Wildcard CORS origins are forbidden in production")
         return self
