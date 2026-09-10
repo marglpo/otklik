@@ -17,16 +17,18 @@ from app.db.models import (
     AppealFeedback,
     AppealMessage,
     AppealParticipant,
+    AppealReturnExplanation,
     ApplicantType,
     CrisisRule,
     MessageAuthorType,
     StaffRole,
     StaffSession,
     StaffUser,
+    TransferRequest,
 )
 
 API_ROOT = Path(__file__).resolve().parents[2]
-CURRENT_REVISION = "20260909_0004"
+CURRENT_REVISION = "20260909_0005"
 
 
 def _run_upgrade(connection: Connection) -> None:
@@ -228,10 +230,11 @@ def test_crisis_rule_uniqueness_and_rejection_constraints(
     with migrated_database_engine.connect() as connection:
         transaction = connection.begin()
         try:
+            unique_suffix = uuid4().hex
             values = {
-                "phrase": "не хочу жить",
-                "normalized_phrase": "не хочу жить",
-                "compact_phrase": "нехочужить",
+                "phrase": f"integration crisis phrase {unique_suffix}",
+                "normalized_phrase": f"integration crisis phrase {unique_suffix}",
+                "compact_phrase": f"integrationcrisisphrase{unique_suffix}",
                 "allow_compact_match": True,
             }
             connection.execute(CrisisRule.__table__.insert().values(id=uuid4(), **values))
@@ -256,6 +259,48 @@ def test_crisis_rule_uniqueness_and_rejection_constraints(
                     "(appeal_id, kind, encrypted_reason, key_version) "
                     "VALUES (:appeal_id, 'unsupported', :reason, 1)"
                 ).bindparams(appeal_id=appeal_id, reason=b"ciphertext"),
+            )
+        finally:
+            transaction.rollback()
+
+
+def test_phase5_encrypted_reason_and_return_constraints(
+    migrated_database_engine: Engine,
+) -> None:
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            appeal_id = _insert_appeal(connection, digest=b"5" * 32)
+            requester_id = _insert_staff(connection)
+            return_id = uuid4()
+            connection.execute(
+                AppealReturnExplanation.__table__.insert().values(
+                    id=return_id,
+                    appeal_id=appeal_id,
+                    return_number=1,
+                    encrypted_body=b"ciphertext",
+                    key_version=1,
+                )
+            )
+            _expect_integrity_error(
+                connection,
+                AppealReturnExplanation.__table__.insert().values(
+                    id=uuid4(),
+                    appeal_id=appeal_id,
+                    return_number=1,
+                    encrypted_body=b"different-ciphertext",
+                    key_version=1,
+                ),
+            )
+            _expect_integrity_error(
+                connection,
+                TransferRequest.__table__.insert().values(
+                    id=uuid4(),
+                    appeal_id=appeal_id,
+                    requested_by_staff_user_id=requester_id,
+                    encrypted_reason=b"ciphertext",
+                    key_version=None,
+                ),
             )
         finally:
             transaction.rollback()

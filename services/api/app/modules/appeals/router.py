@@ -17,10 +17,15 @@ from app.modules.appeals.schemas import (
     AppealCreatedResponse,
     AppealCreateRequest,
     AttachmentResponse,
+    ComplaintRequest,
     CrisisContactRequest,
     CurrentAppealResponse,
+    FeedbackRequest,
     LeaveResponse,
+    PublicMessageRequest,
+    PublicMessagesResponse,
     PublicReferenceResponse,
+    ResolveAppealRequest,
     SavedResponse,
 )
 from app.modules.appeals.service import PublicAppealService
@@ -108,6 +113,68 @@ async def current_appeal(
 ) -> CurrentAppealResponse:
     response.headers["Cache-Control"] = "no-store"
     return await service.current_appeal(appeal_id)
+
+
+@router.get("/appeals/current/messages", response_model=PublicMessagesResponse)
+async def current_messages(
+    response: Response,
+    appeal_id: Annotated[UUID, Depends(get_current_appeal_id)],
+    service: Annotated[PublicAppealService, Depends(get_public_appeal_service)],
+) -> PublicMessagesResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await service.messages(appeal_id)
+
+
+@router.post("/appeals/current/messages", response_model=SavedResponse, status_code=201)
+async def send_current_message(
+    payload: PublicMessageRequest,
+    response: Response,
+    appeal_id: Annotated[UUID, Depends(get_current_appeal_id)],
+    service: Annotated[PublicAppealService, Depends(get_public_appeal_service)],
+) -> SavedResponse:
+    await service.send_message(appeal_id, payload.body.get_secret_value())
+    response.headers["Cache-Control"] = "no-store"
+    return SavedResponse()
+
+
+@router.post("/appeals/current/resolve", response_model=SavedResponse)
+async def resolve_current_appeal(
+    payload: ResolveAppealRequest,
+    response: Response,
+    appeal_id: Annotated[UUID, Depends(get_current_appeal_id)],
+    service: Annotated[PublicAppealService, Depends(get_public_appeal_service)],
+) -> SavedResponse:
+    await service.resolve(
+        appeal_id,
+        choice=payload.choice,
+        explanation=(payload.explanation.get_secret_value() if payload.explanation else None),
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return SavedResponse()
+
+
+@router.post("/appeals/current/feedback", response_model=SavedResponse, status_code=201)
+async def submit_feedback(
+    payload: FeedbackRequest,
+    response: Response,
+    appeal_id: Annotated[UUID, Depends(get_current_appeal_id)],
+    service: Annotated[PublicAppealService, Depends(get_public_appeal_service)],
+) -> SavedResponse:
+    await service.submit_feedback(appeal_id, payload)
+    response.headers["Cache-Control"] = "no-store"
+    return SavedResponse()
+
+
+@router.post("/appeals/current/complaints", response_model=SavedResponse, status_code=201)
+async def submit_complaint(
+    payload: ComplaintRequest,
+    response: Response,
+    appeal_id: Annotated[UUID, Depends(get_current_appeal_id)],
+    service: Annotated[PublicAppealService, Depends(get_public_appeal_service)],
+) -> SavedResponse:
+    await service.submit_complaint(appeal_id, payload.body.get_secret_value())
+    response.headers["Cache-Control"] = "no-store"
+    return SavedResponse()
 
 
 @router.post("/appeals/leave", response_model=LeaveResponse)

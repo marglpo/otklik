@@ -53,6 +53,16 @@ export type CurrentAppeal = {
   updated_at: string
   timeline: Array<{ status: string; text: string; occurred_at: string }>
   rejection_reason: string | null
+  return_count: number
+  max_returns: number
+}
+
+export type PublicMessage = {
+  id: string
+  author_type: "applicant" | "specialist"
+  author_label: string
+  body: string
+  created_at: string
 }
 
 export type CreateAppealInput = {
@@ -107,6 +117,37 @@ export const publicAppealsApi = {
     return apiClient.request<{ status: "stored"; mime_type: string; byte_size: number }>(
       "api/v1/public/appeals/current/attachments",
       { method: "POST", body, ...credentialed }
+    )
+  },
+  messages(signal?: AbortSignal) {
+    return apiClient.get<{ messages: PublicMessage[] }>(
+      "api/v1/public/appeals/current/messages",
+      { signal, ...credentialed }
+    )
+  },
+  sendMessage(body: string) {
+    return apiClient.request<{ status: "saved" }>(
+      "api/v1/public/appeals/current/messages",
+      { method: "POST", json: { body }, ...credentialed }
+    )
+  },
+  resolve(choice: "helped" | "not_helped", explanation?: string) {
+    return apiClient.request<{ status: "saved" }>("api/v1/public/appeals/current/resolve", {
+      method: "POST",
+      json: { choice, explanation: explanation || null },
+      ...credentialed,
+    })
+  },
+  feedback(rating: number, comment?: string) {
+    return apiClient.request<{ status: "saved" }>(
+      "api/v1/public/appeals/current/feedback",
+      { method: "POST", json: { rating, comment: comment || null }, ...credentialed }
+    )
+  },
+  complaint(body: string) {
+    return apiClient.request<{ status: "saved" }>(
+      "api/v1/public/appeals/current/complaints",
+      { method: "POST", json: { body }, ...credentialed }
     )
   },
 }

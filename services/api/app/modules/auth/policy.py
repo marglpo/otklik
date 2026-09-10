@@ -25,6 +25,30 @@ class AccessPolicy:
         return role is StaffRole.OPERATOR
 
     @staticmethod
+    def expert_may_use_workspace(role: StaffRole) -> bool:
+        return role is StaffRole.EXPERT
+
+    @staticmethod
+    def expert_may_access_participating_appeal(
+        role: StaffRole, *, is_active_participant: bool
+    ) -> bool:
+        return role is StaffRole.EXPERT and is_active_participant
+
+    @staticmethod
+    def primary_expert_may_manage_collaboration(
+        role: StaffRole, *, is_current_primary: bool
+    ) -> bool:
+        return role is StaffRole.EXPERT and is_current_primary
+
+    @staticmethod
+    def operator_may_resolve_transfer(role: StaffRole) -> bool:
+        return role is StaffRole.OPERATOR
+
+    @staticmethod
+    def operator_may_read_complaint(role: StaffRole) -> bool:
+        return role is StaffRole.OPERATOR
+
+    @staticmethod
     def can_manage_staff(role: StaffRole) -> bool:
         return role is StaffRole.ADMIN
 

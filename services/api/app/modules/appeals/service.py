@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -6,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import Settings
 from app.core.crypto import ContentCrypto, track_lookup_digest
 from app.core.errors import (
+    ConflictError,
     ForbiddenError,
     InfrastructureError,
     UnauthorizedError,
@@ -15,18 +17,26 @@ from app.core.security.appeal_access import AppealAccessTokenService
 from app.db.models import (
     Appeal,
     AppealContent,
+    AppealFeedback,
     AppealIntakeAnswer,
+    AppealMessage,
+    AppealReturnExplanation,
     Category,
     CrisisContact,
+    StaffComplaint,
     StatusHistory,
 )
-from app.db.models.enums import AppealPriority, AppealStatus
+from app.db.models.enums import AppealPriority, AppealStatus, MessageAuthorType
 from app.db.repositories.public_appeals import PublicAppealRepository
 from app.modules.appeals.crypto_context import (
     appeal_content_aad,
+    appeal_message_aad,
+    complaint_body_aad,
     crisis_contact_aad,
+    feedback_comment_aad,
     intake_answers_aad,
     rejection_reason_aad,
+    return_explanation_aad,
 )
 from app.modules.appeals.schemas import (
     AppealCreatedResponse,
@@ -34,12 +44,16 @@ from app.modules.appeals.schemas import (
     CategoryPublic,
     CrisisSupportResourcePublic,
     CurrentAppealResponse,
+    FeedbackRequest,
     IntakeQuestionPublic,
+    PublicMessage,
+    PublicMessagesResponse,
     PublicReferenceResponse,
     StatusTimelineItem,
 )
 from app.modules.appeals.status import applicant_status_text
 from app.modules.appeals.track import generate_track_number, normalize_track_number
+from app.modules.appeals.transitions import require_applicant_transition
 from app.modules.categories.reference_data import (
     INTAKE_QUESTIONS,
     UNKNOWN_CATEGORY_SLUG,
@@ -245,7 +259,182 @@ class PublicAppealService:
                 if rejection
                 else None
             ),
+            return_count=appeal.return_count,
+            max_returns=self._settings.applicant_max_returns,
         )
+
+    async def messages(self, appeal_id: UUID) -> PublicMessagesResponse:
+        if await self._repository.get_appeal(appeal_id) is None:
+            raise UnauthorizedError("Appeal access is invalid or expired.")
+        messages = await self._repository.list_messages(appeal_id)
+        return PublicMessagesResponse(
+            messages=[
+                PublicMessage(
+                    id=message.id,
+                    author_type=message.author_type,
+                    author_label=(
+                        "Специалист"
+                        if message.author_type is MessageAuthorType.SPECIALIST
+                        else "Вы"
+                    ),
+                    body=self._crypto.decrypt_text(
+                        message.encrypted_body,
+                        aad=appeal_message_aad(appeal_id, message.id),
+                    ),
+                    created_at=message.created_at,
+                )
+                for message in messages
+            ]
+        )
+
+    async def send_message(
+        self, appeal_id: UUID, body: str, *, now: datetime | None = None
+    ) -> None:
+        appeal = await self._repository.lock_appeal(appeal_id)
+        if appeal is None:
+            raise UnauthorizedError("Appeal access is invalid or expired.")
+        if appeal.status not in {
+            AppealStatus.ASSIGNED,
+            AppealStatus.IN_PROGRESS,
+            AppealStatus.NEEDS_CLARIFICATION,
+        }:
+            raise ConflictError("A message cannot be sent in the current appeal status.")
+        normalized = body.strip()
+        if not normalized:
+            raise ValidationError("Message cannot be blank.")
+        message_id = uuid4()
+        records: list[object] = [
+            AppealMessage(
+                id=message_id,
+                appeal_id=appeal.id,
+                author_type=MessageAuthorType.APPLICANT,
+                author_staff_user_id=None,
+                encrypted_body=self._crypto.encrypt_text(
+                    normalized, aad=appeal_message_aad(appeal.id, message_id)
+                ),
+                key_version=self._crypto.key_version,
+            )
+        ]
+        if appeal.status is AppealStatus.NEEDS_CLARIFICATION:
+            require_applicant_transition(appeal.status, AppealStatus.IN_PROGRESS)
+            previous = appeal.status
+            appeal.status = AppealStatus.IN_PROGRESS
+            records.append(
+                StatusHistory(
+                    id=uuid4(),
+                    appeal_id=appeal.id,
+                    from_status=previous,
+                    to_status=AppealStatus.IN_PROGRESS,
+                    changed_by_staff_user_id=None,
+                )
+            )
+        await self._repository.add_records(records)
+        await self._repository.commit()
+
+    async def resolve(
+        self,
+        appeal_id: UUID,
+        *,
+        choice: str,
+        explanation: str | None,
+        now: datetime | None = None,
+    ) -> None:
+        appeal = await self._repository.lock_appeal(appeal_id)
+        if appeal is None:
+            raise UnauthorizedError("Appeal access is invalid or expired.")
+        current_time = now or datetime.now(UTC)
+        target = AppealStatus.COMPLETED if choice == "helped" else AppealStatus.RETURNED
+        require_applicant_transition(appeal.status, target)
+        records: list[object] = []
+        if target is AppealStatus.COMPLETED:
+            appeal.completed_at = current_time
+        else:
+            if appeal.return_count >= self._settings.applicant_max_returns:
+                raise ConflictError(
+                    "The appeal has reached its return limit. Please use the complaint form "
+                    "if you still need to report a problem."
+                )
+            normalized = explanation.strip() if explanation else ""
+            if not normalized:
+                raise ValidationError("Please explain what was missing.")
+            explanation_id = uuid4()
+            return_number = appeal.return_count + 1
+            records.append(
+                AppealReturnExplanation(
+                    id=explanation_id,
+                    appeal_id=appeal.id,
+                    return_number=return_number,
+                    encrypted_body=self._crypto.encrypt_text(
+                        normalized,
+                        aad=return_explanation_aad(appeal.id, explanation_id),
+                    ),
+                    key_version=self._crypto.key_version,
+                )
+            )
+            appeal.return_count = return_number
+            appeal.assigned_expert_id = None
+            await self._repository.deactivate_participants(appeal.id, left_at=current_time)
+        previous = appeal.status
+        appeal.status = target
+        records.append(
+            StatusHistory(
+                id=uuid4(),
+                appeal_id=appeal.id,
+                from_status=previous,
+                to_status=target,
+                changed_by_staff_user_id=None,
+            )
+        )
+        await self._repository.add_records(records)
+        await self._repository.commit()
+
+    async def submit_feedback(self, appeal_id: UUID, payload: FeedbackRequest) -> None:
+        appeal = await self._repository.get_appeal(appeal_id)
+        if appeal is None:
+            raise UnauthorizedError("Appeal access is invalid or expired.")
+        if appeal.status not in {
+            AppealStatus.ANSWER_READY,
+            AppealStatus.COMPLETED,
+            AppealStatus.RETURNED,
+        }:
+            raise ConflictError("Feedback is available after recommendations are ready.")
+        feedback_id = uuid4()
+        comment = payload.comment.get_secret_value().strip() if payload.comment else ""
+        await self._repository.add_feedback(
+            AppealFeedback(
+                id=feedback_id,
+                appeal_id=appeal.id,
+                rating=payload.rating,
+                encrypted_comment=(
+                    self._crypto.encrypt_text(
+                        comment, aad=feedback_comment_aad(appeal.id, feedback_id)
+                    )
+                    if comment
+                    else None
+                ),
+                key_version=self._crypto.key_version if comment else None,
+            )
+        )
+        await self._repository.commit()
+
+    async def submit_complaint(self, appeal_id: UUID, body: str) -> None:
+        if await self._repository.get_appeal(appeal_id) is None:
+            raise UnauthorizedError("Appeal access is invalid or expired.")
+        normalized = body.strip()
+        if not normalized:
+            raise ValidationError("Complaint cannot be blank.")
+        complaint_id = uuid4()
+        await self._repository.add_complaint(
+            StaffComplaint(
+                id=complaint_id,
+                appeal_id=appeal_id,
+                encrypted_body=self._crypto.encrypt_text(
+                    normalized, aad=complaint_body_aad(appeal_id, complaint_id)
+                ),
+                key_version=self._crypto.key_version,
+            )
+        )
+        await self._repository.commit()
 
     async def save_crisis_contact(self, appeal_id: UUID, contact: str) -> None:
         appeal = await self._repository.get_appeal(appeal_id)

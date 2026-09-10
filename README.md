@@ -1,10 +1,10 @@
 # Otklik
 
 Otklik is a privacy-first anonymous case-management platform for trusted appeals. The
-repository is currently at **Phase 4: operator workflow and deterministic routing**. Anonymous
-creation, safe status access, staff authentication, operator triage, persistent crisis rules,
-and encrypted image handling are implemented. Expert workflows, administration UI, analytics,
-and machine learning are not.
+repository is currently at **Phase 5: expert collaboration and resolution**. Anonymous
+creation and status access, staff authentication, operator triage, persistent crisis rules,
+expert/applicant dialogue, collaboration, and encrypted image handling are implemented. The
+full administration UI, analytics, and machine learning are not.
 
 ## Architecture
 
@@ -17,7 +17,8 @@ services:
   Redis-compatible Valkey client, canonical persistence models under `app/db/models`, and
   small cryptographic primitives under `app/core`, staff authentication under
   `app/modules/auth`, the anonymous flow under `app/modules/appeals`, and operator/routing
-  boundaries under `app/modules/operator` and `app/modules/routing`.
+  boundaries under `app/modules/operator` and `app/modules/routing`, with the participant-
+  scoped expert workflow under `app/modules/expert`.
 - PostgreSQL 17 with pgvector 0.8.6.
 - Valkey 8.1.
 
@@ -68,6 +69,9 @@ The API reads the following environment variables:
 | `ATTACHMENT_MAX_BYTES` | Input bytes per attachment; defaults to 10 MiB |
 | `CRISIS_SUPPORT_*` | Organizer-approved public crisis panel copy/contact configuration |
 | `OPERATOR_OVERDUE_HOURS` | Derived queue overdue threshold; defaults to 24 hours |
+| `APPLICANT_MAX_RETURNS` | Maximum applicant returns after recommendations; defaults to 2 |
+| `EXPERT_COMPOSER_LOCK_TTL_SECONDS` | Valkey expert composer-lock TTL; defaults to 30 seconds |
+| `DEMO_*_LOGIN`, `DEMO_*_PASSWORD` | Development-only staff and specialist seed credentials |
 | `LOG_LEVEL` | Python log level; defaults to `INFO` |
 | `CORS_ORIGINS` | Comma-separated origins or a JSON array |
 
@@ -218,9 +222,35 @@ session for the staff member. Central dependencies keep authentication (401) sep
 role authorization (403). Role alone never grants access to sensitive appeal content; future
 appeal-level policies must also evaluate assignment, participation, and workflow state.
 
-The minimal `/staff/login` page redirects authenticated users by role. The operator route now
-hosts the Phase 4 triage workspace; expert and administrator routes remain protected
-placeholders with no workflow functionality.
+The minimal `/staff/login` page redirects authenticated users by role. The operator and expert
+routes host their Phase 4/5 workspaces; the administrator route remains a protected placeholder.
+
+## Expert dialogue and resolution
+
+Expert queue/detail reads require both the exact `expert` role and an active primary or
+coexecutor participant row for the specific appeal. Administrators and unrelated experts do
+not inherit content access. Applicant-facing messages, internal notes, transfer reasons,
+return explanations, feedback comments, and complaints are separate AES-GCM ciphertexts with
+record-specific AAD. Applicant responses label every staff sender only as `Специалист`.
+
+Specialist message, clarification, and final-recommendation writes require ownership of a
+short-lived Valkey composer lock. The UI acquires it on composing, renews it every 15 seconds,
+and releases it after sending; Valkey expiry recovers abandoned locks. Only non-sensitive
+appeal/staff UUIDs are stored in the lock value/key. Polling is used instead of WebSockets.
+
+The primary expert can add an eligible active coexecutor while remaining primary, or submit an
+encrypted transfer request. An exact-role operator approves or rejects the transfer; approval
+validates category eligibility and capacity and atomically updates the primary participant,
+assignment, and history. Final recommendations are encrypted public messages and move the
+appeal to `answer_ready`. The applicant can complete it or return it (at most twice) with an
+encrypted explanation. Returned appeals re-enter the operator queue. Feedback is independent
+of resolution; optional comments and complaints are encrypted, and complaints are available
+only through the operator endpoint, never the expert workspace.
+
+“Не могу взять обращение” creates a distinct targetless pending reassignment request. The
+current expert remains responsible until an operator selects an eligible replacement and
+approves it. Rejection leaves the assignment unchanged. Neither the request nor its encrypted
+reason is included in applicant responses.
 
 ### Demo staff seed
 
@@ -230,8 +260,14 @@ Set all `DEMO_*_PASSWORD` values from `.env.example`, then run from `services/ap
 python -m app.scripts.seed_demo_staff
 ```
 
-The command idempotently creates the configured operator, expert, and admin and creates the
-expert profile. It never prints passwords or stores plaintext passwords, never runs at API
+Run the reference seed first. The command idempotently creates the configured operator,
+administrator, general demo expert, psychologist, lawyer, social teacher, and conflict
+specialist. Every expert receives a profile and one DEMO-only routing membership, with
+overlapping category/group rules suitable for assignment, coexecutor, and transfer tests.
+Specialist passwords can be configured individually; when omitted they use
+`DEMO_EXPERT_PASSWORD` as a development-only fallback.
+Only missing rows are added; existing group metadata and relationships are never overwritten.
+It never prints passwords or stores plaintext passwords, never runs at API
 startup, and refuses production unless `--allow-production` is passed explicitly. The values
 in `.env.example` are demo-only placeholders and must not be used for a real deployment.
 
@@ -267,13 +303,16 @@ Phase 2B adds only `staff_sessions`. Session rows contain digests and lifecycle 
 never raw refresh tokens, IP addresses, User-Agent values, or device fingerprints. Phase 4
 adds `crisis_rules` and encrypted `appeal_rejections` while reusing the Phase 2A routing,
 participant, history, attachment, and audit tables.
+Phase 5 adds encrypted transfer reasons and `appeal_return_explanations`; it reuses the
+existing encrypted messages, notes, feedback, complaints, and participant tables.
 
 ## Migrations
 
 Alembic uses the same `DATABASE_URL` setting as the application. Revision `20260909_0001`
 enables pgvector; revision `20260909_0002` creates the Phase 2A schema without seed users or
 sensitive sample data; revision `20260909_0003` adds revocable staff sessions; revision
-`20260909_0004` adds persistent crisis rules and encrypted rejection explanations:
+`20260909_0004` adds persistent crisis rules and encrypted rejection explanations; revision
+`20260909_0005` adds encrypted transfer reasons and applicant return explanations:
 
 ```powershell
 cd services/api

@@ -1,6 +1,6 @@
 # Otklik MVP threat model
 
-This document describes the Phase 4 security assumptions and limits. It is a living
+This document describes the Phase 5 security assumptions and limits. It is a living
 model, not a claim that the current foundation is a complete production system.
 
 ## Assets
@@ -80,12 +80,24 @@ authorization must be enforced even when infrastructure is on a private network.
   pseudonyms, not raw values.
 - Central role guards distinguish unauthenticated (401) from unauthorized (403) requests, and
   the policy boundary explicitly denies sensitive content based on admin role alone.
+- Expert reads are additionally constrained by active appeal participation; unrelated experts
+  and administrators cannot use expert content endpoints.
+- Public chat and internal notes have distinct encrypted records and serializers. Applicant
+  responses replace staff identity with a generic specialist label, while operator triage
+  serializers do not include applicant-specialist chat.
+- Applicant-facing expert writes require an owned, expiring Valkey composer lock, reducing
+  conflicting simultaneous specialist responses without storing message content in Valkey.
+- Transfer, return, feedback, and complaint free text is encrypted; audit metadata contains
+  only safe identifiers and state values.
+- A targetless expert reassignment request leaves the current primary responsible until an
+  exact-role operator selects an eligible replacement; applicants cannot observe refusal or
+  reassignment internals.
 
 ## MVP limitations
 
-Phase 4 adds operator triage and deterministic recommendation, not expert workflows or complete
-application authorization. There is no applicant-specialist chat API, expert attachment
-retrieval, crisis-rule admin UI, malware scanner, storage retention lifecycle,
+Phase 5 adds expert/applicant dialogue, collaboration, and resolution, but not a full
+administration or analytics surface. There is no crisis-rule admin UI, malware scanner,
+storage retention lifecycle,
 backup policy, or deployment TLS configuration. Phrase-based crisis detection can miss novel
 wording and can produce false positives; it is not a clinical assessment. Crisis-help contacts
 must be approved by organizers before production. Valkey rate limits reduce straightforward

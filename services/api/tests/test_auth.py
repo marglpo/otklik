@@ -13,7 +13,7 @@ from app.core.config import AppEnvironment, Settings
 from app.core.errors import InfrastructureError, UnauthorizedError
 from app.core.security.passwords import hash_password, verify_password
 from app.core.security.tokens import AccessTokenService
-from app.db.models import ExpertProfile, StaffSession, StaffUser
+from app.db.models import Category, ExpertProfile, SpecialistGroup, StaffSession, StaffUser
 from app.db.models.enums import StaffRole
 from app.db.repositories.staff_auth import StaffAuthRepository
 from app.main import create_app
@@ -21,8 +21,25 @@ from app.modules.auth.dependencies import get_auth_service, require_role
 from app.modules.auth.policy import AccessPolicy
 from app.modules.auth.rate_limit import LoginRateLimiter
 from app.modules.auth.service import AuthService
+from app.modules.categories.reference_data import STARTER_CATEGORIES
 from app.modules.staff.service import StaffManagementService
-from app.scripts.seed_demo_staff import _definitions, _seed_definitions, seed_demo_staff
+from app.scripts.seed_demo_staff import (
+    DemoRoutingSeedRepository,
+    _definitions,
+    _password_or_fallback,
+    _routing_definitions,
+    _seed_definitions,
+    _seed_demo_routing,
+    seed_demo_staff,
+)
+
+
+def test_specialist_demo_passwords_fall_back_only_when_unset() -> None:
+    fallback = SecretStr("shared demo password")
+    assert _password_or_fallback(None, fallback) is fallback
+    assert _password_or_fallback(SecretStr(""), fallback) is fallback
+    override = SecretStr("specialist override")
+    assert _password_or_fallback(override, fallback) is override
 
 
 class FakeRepository:
@@ -75,6 +92,53 @@ class FakeRepository:
 
     async def rollback(self) -> None:
         pass
+
+
+class FakeDemoRoutingRepository:
+    def __init__(self, users: list[StaffUser]) -> None:
+        self.users = {user.login: user for user in users}
+        self.groups: dict[str, SpecialistGroup] = {}
+        self.categories = [
+            Category(
+                id=uuid4(),
+                slug=item.slug,
+                name=item.name,
+                description=item.description,
+                is_active=True,
+                sort_order=item.sort_order,
+            )
+            for item in STARTER_CATEGORIES
+        ]
+        self.memberships: set[tuple[UUID, UUID]] = set()
+        self.rules: set[tuple[UUID, UUID]] = set()
+        self.commits = 0
+
+    async def expert(self, login):
+        return self.users.get(login)
+
+    async def group(self, slug):
+        return self.groups.get(slug)
+
+    async def add_group(self, group):
+        self.groups[group.slug] = group
+
+    async def active_categories(self):
+        return self.categories
+
+    async def has_membership(self, expert_id, group_id):
+        return (expert_id, group_id) in self.memberships
+
+    def add_membership(self, expert_id, group_id):
+        self.memberships.add((expert_id, group_id))
+
+    async def has_rule(self, category_id, group_id):
+        return (category_id, group_id) in self.rules
+
+    def add_rule(self, category_id, group_id):
+        self.rules.add((category_id, group_id))
+
+    async def commit(self):
+        self.commits += 1
 
 
 class NoopRateLimiter:
@@ -596,6 +660,10 @@ async def test_demo_staff_seed_is_idempotent_and_creates_expert_profile(
         update={
             "demo_operator_password": SecretStr("operator demo password"),
             "demo_expert_password": SecretStr("expert demo password"),
+            "demo_psychologist_password": SecretStr("psychologist demo password"),
+            "demo_lawyer_password": SecretStr("lawyer demo password"),
+            "demo_social_password": SecretStr("social demo password"),
+            "demo_conflict_password": SecretStr("conflict demo password"),
             "demo_admin_password": SecretStr("admin demo password"),
         }
     )
@@ -605,12 +673,80 @@ async def test_demo_staff_seed_is_idempotent_and_creates_expert_profile(
     first_count = await _seed_definitions(typed_repository, _definitions(settings))
     second_count = await _seed_definitions(typed_repository, _definitions(settings))
 
-    assert first_count == 3
+    assert first_count == 7
     assert second_count == 0
-    assert len(repository.users) == 3
-    expert = next(user for user in repository.users.values() if user.role is StaffRole.EXPERT)
-    assert expert.id in repository.expert_profiles
+    assert len(repository.users) == 7
+    experts = [user for user in repository.users.values() if user.role is StaffRole.EXPERT]
+    assert len(experts) == 5
+    assert all(expert.id in repository.expert_profiles for expert in experts)
     assert all(user.password_hash.startswith("$argon2") for user in repository.users.values())
+
+
+async def test_multiple_demo_expert_routing_seed_is_idempotent(
+    test_settings: Settings,
+) -> None:
+    settings = test_settings.model_copy(
+        update={
+            "demo_operator_password": SecretStr("operator demo password"),
+            "demo_expert_password": SecretStr("expert demo password"),
+            "demo_psychologist_password": SecretStr("psychologist demo password"),
+            "demo_lawyer_password": SecretStr("lawyer demo password"),
+            "demo_social_password": SecretStr("social demo password"),
+            "demo_conflict_password": SecretStr("conflict demo password"),
+            "demo_admin_password": SecretStr("admin demo password"),
+        }
+    )
+    staff_repository = FakeRepository()
+    await _seed_definitions(
+        cast(StaffAuthRepository, staff_repository), _definitions(settings)
+    )
+    routing_repository = FakeDemoRoutingRepository(list(staff_repository.users.values()))
+    managed_group = SpecialistGroup(
+        id=uuid4(),
+        slug="psychologists",
+        name="Administrator-managed name",
+        description="Existing metadata",
+        is_active=True,
+    )
+    routing_repository.groups[managed_group.slug] = managed_group
+
+    first = await _seed_demo_routing(
+        cast(DemoRoutingSeedRepository, routing_repository),
+        _routing_definitions(settings),
+    )
+    second = await _seed_demo_routing(
+        cast(DemoRoutingSeedRepository, routing_repository),
+        _routing_definitions(settings),
+    )
+
+    assert first > 0
+    assert second == 0
+    assert set(routing_repository.groups) == {
+        "demo_generalists",
+        "psychologists",
+        "lawyers",
+        "social_teachers",
+        "conflict_specialists",
+    }
+    assert routing_repository.groups["psychologists"].name == "Administrator-managed name"
+    experts = [user for user in staff_repository.users.values() if user.role is StaffRole.EXPERT]
+    assert len(routing_repository.memberships) == len(experts) == 5
+    psychologist = next(
+        user for user in experts if user.login == settings.demo_psychologist_login
+    )
+    psychologist_group = routing_repository.groups["psychologists"]
+    assert (psychologist.id, psychologist_group.id) in routing_repository.memberships
+    bullying = next(
+        category
+        for category in routing_repository.categories
+        if category.slug == "bullying-insults"
+    )
+    eligible_group_ids = {
+        group_id
+        for category_id, group_id in routing_repository.rules
+        if category_id == bullying.id
+    }
+    assert len(eligible_group_ids) >= 3
 
 
 async def test_demo_staff_seed_refuses_production_without_override(

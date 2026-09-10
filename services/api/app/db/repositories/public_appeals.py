@@ -7,11 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     Appeal,
     AppealContent,
+    AppealFeedback,
     AppealIntakeAnswer,
+    AppealMessage,
+    AppealParticipant,
     AppealRejection,
+    AppealReturnExplanation,
     Attachment,
     Category,
     CrisisContact,
+    StaffComplaint,
     StatusHistory,
 )
 
@@ -90,6 +95,42 @@ class PublicAppealRepository:
             .order_by(StatusHistory.created_at, StatusHistory.id)
         )
         return list(result)
+
+    async def list_messages(self, appeal_id: UUID) -> list[AppealMessage]:
+        return list(
+            await self._session.scalars(
+                select(AppealMessage)
+                .where(AppealMessage.appeal_id == appeal_id)
+                .order_by(AppealMessage.created_at, AppealMessage.id)
+            )
+        )
+
+    async def add_records(self, records: list[object]) -> None:
+        self._session.add_all(records)
+        await self._session.flush()
+
+    async def deactivate_participants(self, appeal_id: UUID, *, left_at) -> None:
+        participants = await self._session.scalars(
+            select(AppealParticipant).where(
+                AppealParticipant.appeal_id == appeal_id,
+                AppealParticipant.is_active.is_(True),
+            )
+        )
+        for participant in participants:
+            participant.is_active = False
+            participant.left_at = left_at
+
+    async def add_feedback(self, feedback: AppealFeedback) -> None:
+        self._session.add(feedback)
+        await self._session.flush()
+
+    async def add_complaint(self, complaint: StaffComplaint) -> None:
+        self._session.add(complaint)
+        await self._session.flush()
+
+    async def add_return_explanation(self, explanation: AppealReturnExplanation) -> None:
+        self._session.add(explanation)
+        await self._session.flush()
 
     async def upsert_crisis_contact(self, contact: CrisisContact) -> None:
         existing = await self._session.get(CrisisContact, contact.appeal_id)

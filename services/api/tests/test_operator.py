@@ -14,14 +14,17 @@ from app.db.models import (
     AppealContent,
     AppealIntakeAnswer,
     AppealParticipant,
+    AppealReturnExplanation,
     AssignmentHistory,
     Attachment,
     Category,
     CrisisContact,
     ExpertProfile,
     SpecialistGroup,
+    StaffComplaint,
     StaffUser,
     StatusHistory,
+    TransferRequest,
 )
 from app.db.models.enums import (
     AppealParticipantRole,
@@ -30,10 +33,12 @@ from app.db.models.enums import (
     ApplicantType,
     RejectionKind,
     StaffRole,
+    TransferRequestStatus,
 )
 from app.db.repositories.operator import (
     OperatorDetailRecord,
     OperatorRepository,
+    OperatorTransferRecord,
     QueueRecord,
     RoutingCandidateRecord,
 )
@@ -41,9 +46,12 @@ from app.main import create_app
 from app.modules.appeals.crypto_context import (
     appeal_content_aad,
     attachment_aad,
+    complaint_body_aad,
     crisis_contact_aad,
     intake_answers_aad,
     rejection_reason_aad,
+    return_explanation_aad,
+    transfer_reason_aad,
 )
 from app.modules.appeals.status import applicant_status_text
 from app.modules.attachments.storage import PrivateAttachmentStorage
@@ -67,6 +75,9 @@ class FakeOperatorRepository:
         self.primary: AppealParticipant | None = None
         self.contact: CrisisContact | None = None
         self.rejection = None
+        self.return_explanations: list[AppealReturnExplanation] = []
+        self.transfer_records: list[OperatorTransferRecord] = []
+        self.complaints: list[StaffComplaint] = []
         self.audits = []
         self.added: list[object] = []
         self.commits = 0
@@ -108,6 +119,7 @@ class FakeOperatorRepository:
             self.attachments,
             self.status_history,
             self.assignment_history,
+            self.return_explanations,
         )
 
     async def get_appeal_for_update(self, appeal_id):
@@ -128,6 +140,38 @@ class FakeOperatorRepository:
 
     async def get_staff(self, staff_id):
         return self.staff.get(staff_id)
+
+    async def list_pending_transfers(self):
+        return [
+            record
+            for record in self.transfer_records
+            if record.transfer.status is TransferRequestStatus.PENDING
+        ]
+
+    async def get_transfer_for_update(self, transfer_id):
+        return next(
+            (
+                record.transfer
+                for record in self.transfer_records
+                if record.transfer.id == transfer_id
+            ),
+            None,
+        )
+
+    async def active_participant(self, appeal_id, staff_id):
+        if (
+            self.primary
+            and self.primary.appeal_id == appeal_id
+            and self.primary.staff_user_id == staff_id
+        ):
+            return self.primary
+        return None
+
+    async def list_complaints(self, appeal_id):
+        return [item for item in self.complaints if item.appeal_id == appeal_id]
+
+    async def flush(self):
+        return None
 
     async def get_attachment(self, appeal_id, attachment_id):
         return next(
@@ -548,3 +592,236 @@ async def test_operator_routes_enforce_401_403_and_operator_success(test_setting
     assert expert.status_code == 403
     assert admin.status_code == 403
     assert operator.status_code == 200
+
+
+async def test_return_explanation_is_decrypted_only_in_operator_detail(test_settings) -> None:
+    appeal = _appeal(_category())
+    appeal.status = AppealStatus.RETURNED
+    repository = FakeOperatorRepository(appeal)
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    explanation_id = uuid4()
+    explanation = AppealReturnExplanation(
+        id=explanation_id,
+        appeal_id=appeal.id,
+        return_number=1,
+        encrypted_body=crypto.encrypt_text(
+            "Не хватило конкретного плана",
+            aad=return_explanation_aad(appeal.id, explanation_id),
+        ),
+        key_version=1,
+    )
+    explanation.created_at = datetime.now(UTC)
+    repository.return_explanations.append(explanation)
+
+    detail = await _service(test_settings, repository).detail(
+        appeal.id, operator_role=StaffRole.OPERATOR
+    )
+
+    assert detail.return_explanations[0].body == "Не хватило конкретного плана"
+    with pytest.raises(ForbiddenError):
+        await _service(test_settings, repository).detail(
+            appeal.id, operator_role=StaffRole.ADMIN
+        )
+
+
+def _transfer_record(
+    repository: FakeOperatorRepository,
+    requester: StaffUser,
+    target: StaffUser | None,
+    crypto: ContentCrypto,
+) -> OperatorTransferRecord:
+    transfer_id = uuid4()
+    transfer = TransferRequest(
+        id=transfer_id,
+        appeal_id=repository.appeal.id,
+        requested_by_staff_user_id=requester.id,
+        requested_target_staff_user_id=target.id if target else None,
+        encrypted_reason=crypto.encrypt_text(
+            "Нужен другой профиль помощи",
+            aad=transfer_reason_aad(repository.appeal.id, transfer_id),
+        ),
+        key_version=1,
+        status=TransferRequestStatus.PENDING,
+    )
+    transfer.created_at = datetime.now(UTC)
+    return OperatorTransferRecord(transfer, repository.appeal, requester, target)
+
+
+async def test_operator_approves_transfer_and_updates_assignment_history(test_settings) -> None:
+    category = _category()
+    appeal = _appeal(category)
+    appeal.status = AppealStatus.IN_PROGRESS
+    requester = _staff(StaffRole.EXPERT)
+    appeal.assigned_expert_id = requester.id
+    repository = FakeOperatorRepository(appeal, category)
+    repository.staff[requester.id] = requester
+    repository.primary = AppealParticipant(
+        id=uuid4(),
+        appeal_id=appeal.id,
+        staff_user_id=requester.id,
+        participant_role=AppealParticipantRole.PRIMARY,
+        is_active=True,
+    )
+    target = _eligible_expert(repository)
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    record = _transfer_record(repository, requester, target, crypto)
+    repository.transfer_records.append(record)
+    service = _service(test_settings, repository)
+
+    listed = await service.transfer_requests(operator_role=StaffRole.OPERATOR)
+    assert listed[0].reason == "Нужен другой профиль помощи"
+    operator_id = uuid4()
+    await service.resolve_transfer(
+        record.transfer.id,
+        approve=True,
+        operator_id=operator_id,
+        operator_role=StaffRole.OPERATOR,
+    )
+
+    assert record.transfer.status is TransferRequestStatus.APPROVED
+    assert appeal.assigned_expert_id == target.id
+    assert repository.primary is not None
+    assert repository.primary.staff_user_id == target.id
+    assert repository.assignment_history[-1].from_expert_id == requester.id
+    assert repository.assignment_history[-1].to_expert_id == target.id
+    assert "Нужен другой профиль" not in repr(repository.audits[-1].metadata_json)
+
+
+async def test_operator_rejects_transfer_and_other_roles_cannot_resolve(test_settings) -> None:
+    category = _category()
+    appeal = _appeal(category)
+    requester = _staff(StaffRole.EXPERT)
+    target = _staff(StaffRole.EXPERT)
+    repository = FakeOperatorRepository(appeal, category)
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    record = _transfer_record(repository, requester, target, crypto)
+    repository.transfer_records.append(record)
+    service = _service(test_settings, repository)
+
+    for role in (StaffRole.EXPERT, StaffRole.ADMIN):
+        with pytest.raises(ForbiddenError):
+            await service.resolve_transfer(
+                record.transfer.id,
+                approve=False,
+                operator_id=uuid4(),
+                operator_role=role,
+            )
+    await service.resolve_transfer(
+        record.transfer.id,
+        approve=False,
+        operator_id=uuid4(),
+        operator_role=StaffRole.OPERATOR,
+    )
+    assert record.transfer.status is TransferRequestStatus.REJECTED
+
+
+async def test_complaint_is_decrypted_for_operator_and_denied_to_expert_admin(
+    test_settings,
+) -> None:
+    appeal = _appeal()
+    repository = FakeOperatorRepository(appeal)
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    complaint_id = uuid4()
+    complaint = StaffComplaint(
+        id=complaint_id,
+        appeal_id=appeal.id,
+        encrypted_body=crypto.encrypt_text(
+            "Жалоба на сервис", aad=complaint_body_aad(appeal.id, complaint_id)
+        ),
+        key_version=1,
+    )
+    complaint.created_at = datetime.now(UTC)
+    repository.complaints.append(complaint)
+    service = _service(test_settings, repository)
+
+    result = await service.complaints(appeal.id, operator_role=StaffRole.OPERATOR)
+    assert result[0].body == "Жалоба на сервис"
+    for role in (StaffRole.EXPERT, StaffRole.ADMIN):
+        with pytest.raises(ForbiddenError):
+            await service.complaints(appeal.id, operator_role=role)
+
+
+async def test_operator_selects_replacement_for_cannot_take_request(test_settings) -> None:
+    category = _category()
+    appeal = _appeal(category)
+    appeal.status = AppealStatus.ASSIGNED
+    requester = _staff(StaffRole.EXPERT)
+    appeal.assigned_expert_id = requester.id
+    repository = FakeOperatorRepository(appeal, category)
+    repository.staff[requester.id] = requester
+    repository.primary = AppealParticipant(
+        id=uuid4(),
+        appeal_id=appeal.id,
+        staff_user_id=requester.id,
+        participant_role=AppealParticipantRole.PRIMARY,
+        is_active=True,
+    )
+    replacement = _eligible_expert(repository)
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    record = _transfer_record(repository, requester, None, crypto)
+    repository.transfer_records.append(record)
+    service = _service(test_settings, repository)
+
+    pending = await service.transfer_requests(operator_role=StaffRole.OPERATOR)
+    assert pending[0].request_kind == "cannot_take"
+    assert pending[0].target_expert_id is None
+    assert [item.expert_id for item in pending[0].eligible_experts] == [replacement.id]
+    for role in (StaffRole.EXPERT, StaffRole.ADMIN):
+        with pytest.raises(ForbiddenError):
+            await service.transfer_requests(operator_role=role)
+        with pytest.raises(ForbiddenError):
+            await service.resolve_transfer(
+                record.transfer.id,
+                approve=True,
+                replacement_expert_id=replacement.id,
+                operator_id=requester.id,
+                operator_role=role,
+            )
+
+    await service.resolve_transfer(
+        record.transfer.id,
+        approve=True,
+        replacement_expert_id=replacement.id,
+        operator_id=uuid4(),
+        operator_role=StaffRole.OPERATOR,
+    )
+
+    assert record.transfer.status is TransferRequestStatus.APPROVED
+    assert appeal.assigned_expert_id == replacement.id
+    assert repository.primary.staff_user_id == replacement.id
+    assert repository.assignment_history[-1].from_expert_id == requester.id
+    assert repository.assignment_history[-1].to_expert_id == replacement.id
+    assert repository.commits == 1
+
+
+async def test_rejected_cannot_take_request_keeps_current_assignment(test_settings) -> None:
+    category = _category()
+    appeal = _appeal(category)
+    appeal.status = AppealStatus.IN_PROGRESS
+    requester = _staff(StaffRole.EXPERT)
+    appeal.assigned_expert_id = requester.id
+    repository = FakeOperatorRepository(appeal, category)
+    primary = AppealParticipant(
+        id=uuid4(),
+        appeal_id=appeal.id,
+        staff_user_id=requester.id,
+        participant_role=AppealParticipantRole.PRIMARY,
+        is_active=True,
+    )
+    repository.primary = primary
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    record = _transfer_record(repository, requester, None, crypto)
+    repository.transfer_records.append(record)
+
+    await _service(test_settings, repository).resolve_transfer(
+        record.transfer.id,
+        approve=False,
+        operator_id=uuid4(),
+        operator_role=StaffRole.OPERATOR,
+    )
+
+    assert record.transfer.status is TransferRequestStatus.REJECTED
+    assert appeal.assigned_expert_id == requester.id
+    assert repository.primary is primary
+    assert primary.is_active is True
+    assert repository.assignment_history == []

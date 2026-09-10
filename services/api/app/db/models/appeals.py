@@ -15,6 +15,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -281,6 +282,7 @@ class TransferRequest(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
             "OR (status IN ('approved', 'rejected') AND resolved_at IS NOT NULL)",
             name="transfer_requests_resolution_consistency",
         ),
+        CheckConstraint("key_version > 0", name="transfer_requests_positive_key_version"),
         Index("ix_transfer_requests_appeal_status", "appeal_id", "status"),
     )
 
@@ -293,7 +295,8 @@ class TransferRequest(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     requested_target_staff_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("staff_users.id", ondelete="SET NULL")
     )
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_reason: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     status: Mapped[TransferRequestStatus] = mapped_column(
         string_enum(TransferRequestStatus, name="transfer_request_status"),
         nullable=False,
@@ -304,6 +307,35 @@ class TransferRequest(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         ForeignKey("staff_users.id", ondelete="SET NULL")
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AppealReturnExplanation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Encrypted applicant explanation for a bounded return to operator triage."""
+
+    __tablename__ = "appeal_return_explanations"
+    __table_args__ = (
+        UniqueConstraint(
+            "appeal_id", "return_number", name="appeal_return_explanations_appeal_number"
+        ),
+        CheckConstraint(
+            "return_number > 0", name="appeal_return_explanations_positive_return_number"
+        ),
+        CheckConstraint(
+            "key_version > 0", name="appeal_return_explanations_positive_key_version"
+        ),
+        Index(
+            "ix_appeal_return_explanations_appeal_created",
+            "appeal_id",
+            "created_at",
+        ),
+    )
+
+    appeal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("appeals.id", ondelete="CASCADE"), nullable=False
+    )
+    return_number: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    encrypted_body: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
 
 
 class AppealFeedback(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

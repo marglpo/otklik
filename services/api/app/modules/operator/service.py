@@ -21,14 +21,23 @@ from app.db.models import (
     AuditLog,
     StatusHistory,
 )
-from app.db.models.enums import AppealParticipantRole, AppealPriority, AppealStatus, StaffRole
+from app.db.models.enums import (
+    AppealParticipantRole,
+    AppealPriority,
+    AppealStatus,
+    StaffRole,
+    TransferRequestStatus,
+)
 from app.db.repositories.operator import OperatorDetailRecord, OperatorRepository
 from app.modules.appeals.crypto_context import (
     appeal_content_aad,
     attachment_aad,
+    complaint_body_aad,
     crisis_contact_aad,
     intake_answers_aad,
     rejection_reason_aad,
+    return_explanation_aad,
+    transfer_reason_aad,
 )
 from app.modules.attachments.storage import PrivateAttachmentStorage
 from app.modules.auth.policy import AccessPolicy
@@ -40,10 +49,13 @@ from app.modules.operator.schemas import (
     OperatorAppealDetail,
     OperatorAssignmentHistoryItem,
     OperatorCategory,
+    OperatorComplaintItem,
     OperatorQueueItem,
     OperatorQueueResponse,
     OperatorReferenceResponse,
+    OperatorReturnExplanation,
     OperatorStatusHistoryItem,
+    OperatorTransferRequestItem,
     OperatorTriageRequest,
     QueueCounters,
 )
@@ -368,6 +380,185 @@ class OperatorService:
         await self._repository.commit()
         return CrisisContactResponse(contact=plaintext)
 
+    async def transfer_requests(
+        self, *, operator_role: StaffRole
+    ) -> list[OperatorTransferRequestItem]:
+        self._require_operator(operator_role)
+        rows = await self._repository.list_pending_transfers()
+        result: list[OperatorTransferRequestItem] = []
+        for row in rows:
+            routing = await self._routing.recommend(row.appeal.category_id)
+            result.append(
+                OperatorTransferRequestItem(
+                    id=row.transfer.id,
+                    appeal_id=row.appeal.id,
+                    requester_display_name=row.requester.display_name,
+                    target_expert_id=row.transfer.requested_target_staff_user_id,
+                    target_display_name=row.target.display_name if row.target else None,
+                    reason=self._transfer_reason(row.transfer),
+                    status=row.transfer.status,
+                    created_at=row.transfer.created_at,
+                    request_kind=(
+                        "targeted_transfer"
+                        if row.transfer.requested_target_staff_user_id is not None
+                        else "cannot_take"
+                    ),
+                    eligible_experts=[
+                        candidate
+                        for candidate in routing.candidates
+                        if candidate.expert_id != row.appeal.assigned_expert_id
+                    ],
+                )
+            )
+        return result
+
+    async def resolve_transfer(
+        self,
+        transfer_id: UUID,
+        *,
+        approve: bool,
+        replacement_expert_id: UUID | None = None,
+        operator_id: UUID,
+        operator_role: StaffRole,
+        now: datetime | None = None,
+    ) -> ActionResponse:
+        if not AccessPolicy.operator_may_resolve_transfer(operator_role):
+            raise ForbiddenError()
+        transfer = await self._repository.get_transfer_for_update(transfer_id)
+        if transfer is None:
+            raise NotFoundError("Transfer request not found.")
+        if transfer.status is not TransferRequestStatus.PENDING:
+            raise ConflictError("Transfer request has already been resolved.")
+        current_time = now or datetime.now(UTC)
+        transfer.resolved_by_staff_user_id = operator_id
+        transfer.resolved_at = current_time
+        if not approve:
+            transfer.status = TransferRequestStatus.REJECTED
+            await self._repository.add_all(
+                [
+                    self._audit(
+                        operator_id,
+                        (
+                            "operator.transfer_rejected"
+                            if transfer.requested_target_staff_user_id is not None
+                            else "operator.reassignment_rejected"
+                        ),
+                        transfer.appeal_id,
+                        {"transfer_request_id": str(transfer.id)},
+                    )
+                ]
+            )
+            await self._repository.commit()
+            return ActionResponse()
+
+        appeal = await self._repository.get_appeal_for_update(transfer.appeal_id)
+        if appeal is None:
+            raise NotFoundError("Appeal not found.")
+        if appeal.status not in {
+            AppealStatus.ASSIGNED,
+            AppealStatus.IN_PROGRESS,
+            AppealStatus.NEEDS_CLARIFICATION,
+        }:
+            raise ConflictError("Appeal cannot be transferred in its current status.")
+        target_id = replacement_expert_id or transfer.requested_target_staff_user_id
+        if target_id is None:
+            raise ValidationError("Choose an eligible replacement expert.")
+        if target_id == appeal.assigned_expert_id:
+            raise ValidationError("Choose an expert other than the current primary.")
+        target = await self._repository.get_staff(target_id)
+        if target is None or target.role is not StaffRole.EXPERT or not target.is_active:
+            raise ValidationError("Transfer target is not an active expert.")
+        if appeal.category_id is None:
+            raise ValidationError("Choose a category before approving transfer.")
+        recommendation = await self._routing.recommend(appeal.category_id)
+        candidate = next(
+            (item for item in recommendation.candidates if item.expert_id == target_id), None
+        )
+        if candidate is None:
+            raise ForbiddenError("Transfer target is not eligible for the category.")
+        target_participant = await self._repository.active_participant(appeal.id, target_id)
+        if not candidate.available and target_participant is None:
+            raise ConflictError("Transfer target is at configured capacity.")
+
+        previous_expert = appeal.assigned_expert_id
+        previous_status = appeal.status
+        primary = await self._repository.current_primary(appeal.id)
+        if primary is not None and primary.staff_user_id != target_id:
+            primary.is_active = False
+            primary.left_at = current_time
+            await self._repository.flush()
+        records: list[object] = []
+        if target_participant is None:
+            records.append(
+                AppealParticipant(
+                    id=uuid4(),
+                    appeal_id=appeal.id,
+                    staff_user_id=target_id,
+                    participant_role=AppealParticipantRole.PRIMARY,
+                    is_active=True,
+                    joined_at=current_time,
+                )
+            )
+        else:
+            target_participant.participant_role = AppealParticipantRole.PRIMARY
+        appeal.assigned_expert_id = target_id
+        appeal.status = AppealStatus.IN_PROGRESS
+        transfer.status = TransferRequestStatus.APPROVED
+        records.append(
+            AssignmentHistory(
+                id=uuid4(),
+                appeal_id=appeal.id,
+                from_expert_id=previous_expert,
+                to_expert_id=target_id,
+                changed_by_staff_user_id=operator_id,
+                reason=f"approved transfer request {transfer.id}",
+            )
+        )
+        if previous_status is not AppealStatus.IN_PROGRESS:
+            records.append(
+                StatusHistory(
+                    id=uuid4(),
+                    appeal_id=appeal.id,
+                    from_status=previous_status,
+                    to_status=AppealStatus.IN_PROGRESS,
+                    changed_by_staff_user_id=operator_id,
+                )
+            )
+        records.append(
+            self._audit(
+                operator_id,
+                (
+                    "operator.transfer_approved"
+                    if transfer.requested_target_staff_user_id is not None
+                    else "operator.reassignment_approved"
+                ),
+                appeal.id,
+                {"transfer_request_id": str(transfer.id), "expert_id": str(target_id)},
+            )
+        )
+        await self._repository.add_all(records)
+        await self._repository.commit()
+        return ActionResponse()
+
+    async def complaints(
+        self, appeal_id: UUID, *, operator_role: StaffRole
+    ) -> list[OperatorComplaintItem]:
+        if not AccessPolicy.operator_may_read_complaint(operator_role):
+            raise ForbiddenError()
+        if await self._repository.get_appeal_for_update(appeal_id) is None:
+            raise NotFoundError("Appeal not found.")
+        rows = await self._repository.list_complaints(appeal_id)
+        return [
+            OperatorComplaintItem(
+                id=item.id,
+                body=self._crypto.decrypt_text(
+                    item.encrypted_body, aad=complaint_body_aad(appeal_id, item.id)
+                ),
+                created_at=item.created_at,
+            )
+            for item in rows
+        ]
+
     async def attachment(
         self,
         appeal_id: UUID,
@@ -473,7 +664,25 @@ class OperatorService:
                 )
                 for item in record.assignment_history
             ],
+            return_explanations=[
+                OperatorReturnExplanation(
+                    id=item.id,
+                    return_number=item.return_number,
+                    body=self._crypto.decrypt_text(
+                        item.encrypted_body,
+                        aad=return_explanation_aad(appeal.id, item.id),
+                    ),
+                    created_at=item.created_at,
+                )
+                for item in record.return_explanations
+            ],
             routing=await self._routing.recommend(appeal.category_id),
+        )
+
+    def _transfer_reason(self, transfer) -> str:
+        return self._crypto.decrypt_text(
+            transfer.encrypted_reason,
+            aad=transfer_reason_aad(transfer.appeal_id, transfer.id),
         )
 
     @staticmethod

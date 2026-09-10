@@ -30,6 +30,10 @@ def _sensitive_values(settings: Settings) -> list[str]:
         settings.content_encryption_key,
         settings.demo_operator_password,
         settings.demo_expert_password,
+        settings.demo_psychologist_password,
+        settings.demo_lawyer_password,
+        settings.demo_social_password,
+        settings.demo_conflict_password,
         settings.demo_admin_password,
     ):
         if secret is not None:

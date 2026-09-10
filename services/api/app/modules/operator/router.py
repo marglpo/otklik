@@ -11,10 +11,13 @@ from app.modules.operator.schemas import (
     AssignmentRequest,
     CrisisContactResponse,
     OperatorAppealDetail,
+    OperatorComplaintItem,
     OperatorQueueResponse,
     OperatorReferenceResponse,
+    OperatorTransferRequestItem,
     OperatorTriageRequest,
     RejectionRequest,
+    TransferResolutionRequest,
 )
 from app.modules.operator.service import OperatorService
 
@@ -142,3 +145,38 @@ async def operator_attachment(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.get("/transfer-requests", response_model=list[OperatorTransferRequestItem])
+async def operator_transfer_requests(
+    operator: Operator, service: Service, response: Response
+) -> list[OperatorTransferRequestItem]:
+    response.headers["Cache-Control"] = "no-store"
+    return await service.transfer_requests(operator_role=operator.role)
+
+
+@router.post("/transfer-requests/{transfer_id}/resolve", response_model=ActionResponse)
+async def operator_resolve_transfer(
+    transfer_id: UUID,
+    payload: TransferResolutionRequest,
+    operator: Operator,
+    service: Service,
+) -> ActionResponse:
+    return await service.resolve_transfer(
+        transfer_id,
+        approve=payload.decision == "approve",
+        replacement_expert_id=payload.replacement_expert_id,
+        operator_id=operator.id,
+        operator_role=operator.role,
+    )
+
+
+@router.get("/appeals/{appeal_id}/complaints", response_model=list[OperatorComplaintItem])
+async def operator_complaints(
+    appeal_id: UUID,
+    operator: Operator,
+    service: Service,
+    response: Response,
+) -> list[OperatorComplaintItem]:
+    response.headers["Cache-Control"] = "no-store"
+    return await service.complaints(appeal_id, operator_role=operator.role)

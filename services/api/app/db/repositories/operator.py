@@ -1,8 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from sqlalchemy import Select, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.db.models import (
     Appeal,
@@ -10,6 +11,7 @@ from app.db.models import (
     AppealIntakeAnswer,
     AppealParticipant,
     AppealRejection,
+    AppealReturnExplanation,
     AssignmentHistory,
     Attachment,
     AuditLog,
@@ -19,10 +21,18 @@ from app.db.models import (
     ExpertGroupMembership,
     ExpertProfile,
     SpecialistGroup,
+    StaffComplaint,
     StaffUser,
     StatusHistory,
+    TransferRequest,
 )
-from app.db.models.enums import AppealParticipantRole, AppealPriority, AppealStatus, StaffRole
+from app.db.models.enums import (
+    AppealParticipantRole,
+    AppealPriority,
+    AppealStatus,
+    StaffRole,
+    TransferRequestStatus,
+)
 
 ACTIVE_APPEAL_STATUSES = (
     AppealStatus.NEW,
@@ -52,6 +62,15 @@ class OperatorDetailRecord:
     attachments: list[Attachment]
     status_history: list[StatusHistory]
     assignment_history: list[AssignmentHistory]
+    return_explanations: list[AppealReturnExplanation] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorTransferRecord:
+    transfer: TransferRequest
+    appeal: Appeal
+    requester: StaffUser
+    target: StaffUser | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +187,16 @@ class OperatorRepository:
                 .order_by(AssignmentHistory.created_at, AssignmentHistory.id)
             )
         )
+        return_explanations = list(
+            await self._session.scalars(
+                select(AppealReturnExplanation)
+                .where(AppealReturnExplanation.appeal_id == appeal_id)
+                .order_by(
+                    AppealReturnExplanation.return_number,
+                    AppealReturnExplanation.created_at,
+                )
+            )
+        )
         return OperatorDetailRecord(
             appeal,
             category,
@@ -178,6 +207,7 @@ class OperatorRepository:
             attachments,
             status_history,
             assignment_history,
+            return_explanations,
         )
 
     async def get_appeal_for_update(self, appeal_id: UUID) -> Appeal | None:
@@ -199,9 +229,11 @@ class OperatorRepository:
 
     async def routing_candidates(self, category_id: UUID) -> list[RoutingCandidateRecord]:
         active_load = (
-            select(func.count(Appeal.id))
+            select(func.count(func.distinct(Appeal.id)))
+            .join(AppealParticipant, AppealParticipant.appeal_id == Appeal.id)
             .where(
-                Appeal.assigned_expert_id == ExpertProfile.staff_user_id,
+                AppealParticipant.staff_user_id == ExpertProfile.staff_user_id,
+                AppealParticipant.is_active.is_(True),
                 Appeal.status.in_(ACTIVE_APPEAL_STATUSES),
             )
             .correlate(ExpertProfile)
@@ -260,6 +292,49 @@ class OperatorRepository:
     async def get_crisis_contact(self, appeal_id: UUID) -> CrisisContact | None:
         return await self._session.get(CrisisContact, appeal_id)
 
+    async def list_pending_transfers(self) -> list[OperatorTransferRecord]:
+        requester = aliased(StaffUser, name="requester")
+        target = aliased(StaffUser, name="target")
+        rows = (
+            await self._session.execute(
+                select(TransferRequest, Appeal, requester, target)
+                .join(Appeal, Appeal.id == TransferRequest.appeal_id)
+                .join(requester, requester.id == TransferRequest.requested_by_staff_user_id)
+                .outerjoin(target, target.id == TransferRequest.requested_target_staff_user_id)
+                .where(TransferRequest.status == TransferRequestStatus.PENDING)
+                .order_by(TransferRequest.created_at, TransferRequest.id)
+            )
+        ).all()
+        return [
+            OperatorTransferRecord(row[0], row[1], row[2], row[3])
+            for row in rows
+        ]
+
+    async def get_transfer_for_update(self, transfer_id: UUID) -> TransferRequest | None:
+        return await self._session.scalar(
+            select(TransferRequest).where(TransferRequest.id == transfer_id).with_for_update()
+        )
+
+    async def active_participant(
+        self, appeal_id: UUID, staff_user_id: UUID
+    ) -> AppealParticipant | None:
+        return await self._session.scalar(
+            select(AppealParticipant).where(
+                AppealParticipant.appeal_id == appeal_id,
+                AppealParticipant.staff_user_id == staff_user_id,
+                AppealParticipant.is_active.is_(True),
+            )
+        )
+
+    async def list_complaints(self, appeal_id: UUID) -> list[StaffComplaint]:
+        return list(
+            await self._session.scalars(
+                select(StaffComplaint)
+                .where(StaffComplaint.appeal_id == appeal_id)
+                .order_by(StaffComplaint.created_at, StaffComplaint.id)
+            )
+        )
+
     async def upsert_rejection(self, rejection: AppealRejection) -> None:
         existing = await self._session.get(AppealRejection, rejection.appeal_id)
         if existing is None:
@@ -280,6 +355,9 @@ class OperatorRepository:
 
     async def commit(self) -> None:
         await self._session.commit()
+
+    async def flush(self) -> None:
+        await self._session.flush()
 
     async def rollback(self) -> None:
         await self._session.rollback()

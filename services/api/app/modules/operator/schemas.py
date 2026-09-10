@@ -1,10 +1,16 @@
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
-from app.db.models.enums import AppealPriority, AppealStatus, ApplicantType, RejectionKind
+from app.db.models.enums import (
+    AppealPriority,
+    AppealStatus,
+    ApplicantType,
+    RejectionKind,
+    TransferRequestStatus,
+)
 
 
 class OperatorCategory(BaseModel):
@@ -61,6 +67,13 @@ class OperatorAssignmentHistoryItem(BaseModel):
     created_at: datetime
 
 
+class OperatorReturnExplanation(BaseModel):
+    id: UUID
+    return_number: int
+    body: str
+    created_at: datetime
+
+
 class AssignedExpert(BaseModel):
     id: UUID
     display_name: str
@@ -101,6 +114,7 @@ class OperatorAppealDetail(BaseModel):
     assigned_expert: AssignedExpert | None
     status_history: list[OperatorStatusHistoryItem]
     assignment_history: list[OperatorAssignmentHistoryItem]
+    return_explanations: list[OperatorReturnExplanation]
     routing: RoutingRecommendation
 
 
@@ -136,3 +150,33 @@ class CrisisContactResponse(BaseModel):
 
 class OperatorReferenceResponse(BaseModel):
     categories: list[OperatorCategory]
+
+
+class OperatorTransferRequestItem(BaseModel):
+    id: UUID
+    appeal_id: UUID
+    requester_display_name: str
+    target_expert_id: UUID | None
+    target_display_name: str | None
+    reason: str
+    status: TransferRequestStatus
+    created_at: datetime
+    request_kind: Literal["targeted_transfer", "cannot_take"]
+    eligible_experts: list[RoutingCandidate]
+
+
+class TransferResolutionRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+    replacement_expert_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def reject_does_not_select_replacement(self) -> Self:
+        if self.decision == "reject" and self.replacement_expert_id is not None:
+            raise ValueError("A rejected request cannot select a replacement expert")
+        return self
+
+
+class OperatorComplaintItem(BaseModel):
+    id: UUID
+    body: str
+    created_at: datetime

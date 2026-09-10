@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     appeal_submission_rate_limit_attempts: int = Field(default=10, ge=1, le=100)
     appeal_submission_rate_limit_window_seconds: int = Field(default=3600, ge=60, le=86400)
     operator_overdue_hours: int = Field(default=24, ge=1, le=720)
+    applicant_max_returns: int = Field(default=2, ge=1, le=5)
+    expert_composer_lock_ttl_seconds: int = Field(default=30, ge=10, le=120)
 
     attachment_storage_path: Path = Path("var/private/attachments")
     attachment_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
@@ -101,6 +103,14 @@ class Settings(BaseSettings):
     demo_operator_password: SecretStr | None = None
     demo_expert_login: str = "demo_expert"
     demo_expert_password: SecretStr | None = None
+    demo_psychologist_login: str = "demo_psychologist"
+    demo_psychologist_password: SecretStr | None = None
+    demo_lawyer_login: str = "demo_lawyer"
+    demo_lawyer_password: SecretStr | None = None
+    demo_social_login: str = "demo_social"
+    demo_social_password: SecretStr | None = None
+    demo_conflict_login: str = "demo_conflict"
+    demo_conflict_password: SecretStr | None = None
     demo_admin_login: str = "demo_admin"
     demo_admin_password: SecretStr | None = None
 

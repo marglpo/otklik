@@ -8,33 +8,48 @@ from pydantic import SecretStr
 
 from app.core.config import AppEnvironment
 from app.core.crypto import ContentCrypto, track_lookup_digest
-from app.core.errors import RateLimitError, UnauthorizedError, ValidationError
+from app.core.errors import ConflictError, RateLimitError, UnauthorizedError, ValidationError
 from app.core.security.tokens import AccessTokenService
 from app.db.models import (
     Appeal,
     AppealContent,
+    AppealFeedback,
     AppealIntakeAnswer,
+    AppealMessage,
     AppealRejection,
+    AppealReturnExplanation,
     Category,
     CrisisContact,
+    StaffComplaint,
     StatusHistory,
 )
-from app.db.models.enums import AppealPriority, AppealStatus, ApplicantType, RejectionKind
+from app.db.models.enums import (
+    AppealPriority,
+    AppealStatus,
+    ApplicantType,
+    MessageAuthorType,
+    RejectionKind,
+)
 from app.db.repositories.public_appeals import AppealWithCategory, PublicAppealRepository
 from app.main import create_app
 from app.modules.appeals.crypto_context import (
     appeal_content_aad,
+    appeal_message_aad,
+    complaint_body_aad,
     crisis_contact_aad,
+    feedback_comment_aad,
     intake_answers_aad,
     rejection_reason_aad,
+    return_explanation_aad,
 )
 from app.modules.appeals.dependencies import (
     get_public_appeal_rate_limiter,
     get_public_appeal_service,
 )
 from app.modules.appeals.rate_limit import PublicAppealRateLimiter
-from app.modules.appeals.schemas import AppealCreateRequest
+from app.modules.appeals.schemas import AppealCreateRequest, FeedbackRequest
 from app.modules.appeals.service import INVALID_TRACK_MESSAGE, PublicAppealService
+from app.modules.appeals.status import applicant_status_text
 from app.modules.appeals.track import (
     TRACK_ALPHABET,
     generate_track_number,
@@ -55,6 +70,11 @@ class FakePublicRepository:
         self.history: dict[UUID, list[StatusHistory]] = {}
         self.contacts: dict[UUID, CrisisContact] = {}
         self.rejections: dict[UUID, AppealRejection] = {}
+        self.messages: dict[UUID, list[AppealMessage]] = {}
+        self.feedback: list[AppealFeedback] = []
+        self.complaints: list[StaffComplaint] = []
+        self.returns: list[AppealReturnExplanation] = []
+        self.deactivated_appeals: set[UUID] = set()
         self.commits = 0
 
     async def list_active_categories(self) -> list[Category]:
@@ -104,6 +124,34 @@ class FakePublicRepository:
 
     async def get_appeal(self, appeal_id: UUID) -> Appeal | None:
         return self.appeals.get(appeal_id)
+
+    async def lock_appeal(self, appeal_id: UUID) -> Appeal | None:
+        return self.appeals.get(appeal_id)
+
+    async def list_messages(self, appeal_id: UUID) -> list[AppealMessage]:
+        return self.messages.get(appeal_id, [])
+
+    async def add_records(self, records: list[object]) -> None:
+        for record in records:
+            if isinstance(record, AppealMessage):
+                record.created_at = datetime.now(UTC)
+                self.messages.setdefault(record.appeal_id, []).append(record)
+            elif isinstance(record, StatusHistory):
+                record.created_at = datetime.now(UTC)
+                self.history.setdefault(record.appeal_id, []).append(record)
+            elif isinstance(record, AppealReturnExplanation):
+                record.created_at = datetime.now(UTC)
+                self.returns.append(record)
+
+    async def deactivate_participants(self, appeal_id: UUID, *, left_at) -> None:
+        del left_at
+        self.deactivated_appeals.add(appeal_id)
+
+    async def add_feedback(self, feedback: AppealFeedback) -> None:
+        self.feedback.append(feedback)
+
+    async def add_complaint(self, complaint: StaffComplaint) -> None:
+        self.complaints.append(complaint)
 
     async def get_rejection(self, appeal_id: UUID) -> AppealRejection | None:
         return self.rejections.get(appeal_id)
@@ -335,11 +383,20 @@ async def test_current_response_contains_only_applicant_safe_fields(test_setting
         "updated_at",
         "timeline",
         "rejection_reason",
+        "return_count",
+        "max_returns",
     }
     serialized = response.model_dump_json()
     assert all(
         forbidden not in serialized
-        for forbidden in ("track_digest", "assigned_expert", "staff_user", "internal_notes")
+        for forbidden in (
+            "track_digest",
+            "assigned_expert",
+            "staff_user",
+            "internal_notes",
+            "transfer_request",
+            "cannot_take",
+        )
     )
 
 
@@ -430,3 +487,147 @@ async def test_reference_seed_is_idempotent() -> None:
     assert first == (len(STARTER_CATEGORIES), 0)
     assert second == (0, 0)
     assert len(repository.categories) == len(STARTER_CATEGORIES)
+
+
+def test_applicant_status_mapping_remains_generic_and_supportive() -> None:
+    assert applicant_status_text(AppealStatus.NEW, ApplicantType.PARENT).startswith(
+        "Мы получили ваше обращение"
+    )
+    assert (
+        applicant_status_text(AppealStatus.ASSIGNED, ApplicantType.STUDENT)
+        == "Мы передали обращение специалисту."
+    )
+    assert (
+        applicant_status_text(AppealStatus.IN_PROGRESS, ApplicantType.TEACHER)
+        == "Специалист разбирается в ситуации."
+    )
+    assert "задал вопрос" in applicant_status_text(
+        AppealStatus.NEEDS_CLARIFICATION, ApplicantType.STUDENT
+    )
+    assert (
+        applicant_status_text(AppealStatus.ANSWER_READY, ApplicantType.PARENT)
+        == "Мы подготовили рекомендации."
+    )
+    assert all(
+        name not in applicant_status_text(status, ApplicantType.PARENT)
+        for status in (
+            AppealStatus.NEW,
+            AppealStatus.ASSIGNED,
+            AppealStatus.IN_PROGRESS,
+            AppealStatus.NEEDS_CLARIFICATION,
+            AppealStatus.ANSWER_READY,
+        )
+        for name in ("Психолог", "Юрист", "Demo Expert")
+    )
+
+
+async def test_public_chat_encrypts_applicant_reply_and_hides_staff_identity(
+    test_settings,
+) -> None:
+    service, repository = _service(test_settings)
+    created = await service.create_appeal(_payload(description="Нужна помощь"))
+    appeal_id = service.decode_access_token(created.access_token)
+    appeal = repository.appeals[appeal_id]
+    appeal.status = AppealStatus.IN_PROGRESS
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+    specialist_message_id = uuid4()
+    specialist = AppealMessage(
+        id=specialist_message_id,
+        appeal_id=appeal_id,
+        author_type=MessageAuthorType.SPECIALIST,
+        author_staff_user_id=uuid4(),
+        encrypted_body=crypto.encrypt_text(
+            "Ответ специалиста",
+            aad=appeal_message_aad(appeal_id, specialist_message_id),
+        ),
+        key_version=crypto.key_version,
+    )
+    specialist.created_at = datetime.now(UTC)
+    repository.messages[appeal_id] = [specialist]
+
+    await service.send_message(appeal_id, "Мой ответ")
+    response = await service.messages(appeal_id)
+    applicant = repository.messages[appeal_id][1]
+
+    assert crypto.decrypt_text(
+        applicant.encrypted_body, aad=appeal_message_aad(appeal_id, applicant.id)
+    ) == "Мой ответ"
+    assert applicant.author_staff_user_id is None
+    assert [item.author_label for item in response.messages] == ["Специалист", "Вы"]
+    serialized = response.model_dump_json()
+    assert str(specialist.author_staff_user_id) not in serialized
+    assert "internal_note" not in serialized
+
+
+async def test_clarification_reply_returns_appeal_to_in_progress(test_settings) -> None:
+    service, repository = _service(test_settings)
+    created = await service.create_appeal(_payload(description="Нужна помощь"))
+    appeal_id = service.decode_access_token(created.access_token)
+    repository.appeals[appeal_id].status = AppealStatus.NEEDS_CLARIFICATION
+
+    await service.send_message(appeal_id, "Уточняю ситуацию")
+
+    assert repository.appeals[appeal_id].status is AppealStatus.IN_PROGRESS
+    assert repository.history[appeal_id][-1].to_status is AppealStatus.IN_PROGRESS
+
+
+async def test_resolution_encrypts_returns_enforces_limit_and_completes(test_settings) -> None:
+    service, repository = _service(test_settings)
+    created = await service.create_appeal(_payload(description="Нужна помощь"))
+    appeal_id = service.decode_access_token(created.access_token)
+    appeal = repository.appeals[appeal_id]
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+
+    for number in (1, 2):
+        appeal.status = AppealStatus.ANSWER_READY
+        await service.resolve(
+            appeal_id,
+            choice="not_helped",
+            explanation=f"Не хватило шага {number}",
+        )
+        stored = repository.returns[-1]
+        assert crypto.decrypt_text(
+            stored.encrypted_body,
+            aad=return_explanation_aad(appeal_id, stored.id),
+        ) == f"Не хватило шага {number}"
+    assert appeal.return_count == 2
+    assert appeal_id in repository.deactivated_appeals
+    appeal.status = AppealStatus.ANSWER_READY
+    with pytest.raises(ConflictError):
+        await service.resolve(appeal_id, choice="not_helped", explanation="Ещё возврат")
+
+    second_service, second_repository = _service(test_settings)
+    second = await second_service.create_appeal(_payload(description="Другой случай"))
+    second_id = second_service.decode_access_token(second.access_token)
+    second_repository.appeals[second_id].status = AppealStatus.ANSWER_READY
+    completed_at = datetime(2026, 9, 10, tzinfo=UTC)
+    await second_service.resolve(
+        second_id, choice="helped", explanation=None, now=completed_at
+    )
+    assert second_repository.appeals[second_id].status is AppealStatus.COMPLETED
+    assert second_repository.appeals[second_id].completed_at == completed_at
+
+
+async def test_feedback_and_complaint_sensitive_text_is_encrypted(test_settings) -> None:
+    service, repository = _service(test_settings)
+    created = await service.create_appeal(_payload(description="Нужна помощь"))
+    appeal_id = service.decode_access_token(created.access_token)
+    repository.appeals[appeal_id].status = AppealStatus.COMPLETED
+    crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
+
+    await service.submit_feedback(
+        appeal_id,
+        FeedbackRequest(rating=4, comment=SecretStr("Полезный комментарий")),
+    )
+    await service.submit_complaint(appeal_id, "Текст жалобы")
+
+    stored_feedback = repository.feedback[0]
+    stored_complaint = repository.complaints[0]
+    assert crypto.decrypt_text(
+        stored_feedback.encrypted_comment,
+        aad=feedback_comment_aad(appeal_id, stored_feedback.id),
+    ) == "Полезный комментарий"
+    assert crypto.decrypt_text(
+        stored_complaint.encrypted_body,
+        aad=complaint_body_aad(appeal_id, stored_complaint.id),
+    ) == "Текст жалобы"

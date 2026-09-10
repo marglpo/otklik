@@ -17,9 +17,9 @@ the isolated `crisis_contacts` table and is available only through a separately 
 audited operator endpoint. It must
 not be copied into appeal metadata, appeal text, logs, audit metadata, or routing history.
 
-Feedback comments and complaints are encrypted because free text can contain identifying
-information. Assignment, status, and transfer reasons are operational metadata; future UI and
-service validation must prevent sensitive applicant content from being copied into them.
+Feedback comments, complaints, applicant return explanations, and expert transfer reasons are
+encrypted because free text can contain identifying information. Assignment and status history
+retain only safe operational metadata; sensitive explanations are not copied into them.
 
 ## Anonymous track access
 
@@ -47,8 +47,10 @@ User-Agent, or device fingerprint. Refresh rotation, logout, account deactivatio
 changes provide server-side revocation.
 
 Administrative role membership does not imply access to appeal text, applicant-specialist
-chat, or crisis contacts. Future appeal-level authorization must enforce the narrower operator
-triage and expert assignment/participation rules in addition to role checks.
+chat, notes, complaints, or crisis contacts. Expert content reads require an active primary or
+coexecutor participant row for that appeal. Operator triage serializers intentionally omit
+applicant-specialist chat after assignment. Applicants see only the generic sender label
+`Специалист`, never a staff login or display name.
 
 ## Encryption boundary
 
@@ -93,6 +95,16 @@ Administrator role alone does not grant this access. Applicant-visible rejection
 are encrypted separately; the text is absent from audit metadata and status-history reasons.
 Attachment retrieval verifies the encrypted-blob digest and reveals no private storage path,
 storage key, or original filename.
+
+Expert applicant-facing sends require ownership of a short-lived Valkey composer lock. The
+lock contains only appeal/staff UUIDs, expires automatically, and is never persisted to
+PostgreSQL. Internal notes remain a different encrypted table and API collection from public
+chat. Coexecutor/transfer state is staff-only. A `not_helped` resolution stores its explanation
+in `appeal_return_explanations`, visible only in authorized operator triage, and is limited to
+two returns. Feedback is separate from resolution; encrypted complaints are operator-only.
+An expert's targetless “cannot take” request is also stored as an encrypted transfer reason.
+It does not change assignment or applicant-visible status until an operator chooses and
+approves an eligible replacement; the request is absent from every public serializer.
 
 Audit records may contain allowlisted operational metadata only. Audit `reason` and
 `metadata_json` must never contain appeal or chat text, internal notes, crisis contacts,

@@ -1,30 +1,60 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
 import { CrisisPanel } from "@/components/appeals/crisis-panel"
 import { PublicShell } from "@/components/appeals/public-shell"
 import { Button } from "@/components/ui/button"
-import type { CurrentAppeal } from "@/lib/appeals"
+import { Textarea } from "@/components/ui/textarea"
+import type { CurrentAppeal, PublicMessage } from "@/lib/appeals"
 import { publicAppealsApi } from "@/lib/appeals"
 
 export default function CurrentAppealPage() {
   const router = useRouter()
   const [appeal, setAppeal] = useState<CurrentAppeal | null>(null)
+  const [messages, setMessages] = useState<PublicMessage[]>([])
+  const [message, setMessage] = useState("")
+  const [returnExplanation, setReturnExplanation] = useState("")
+  const [rating, setRating] = useState(5)
+  const [feedback, setFeedback] = useState("")
+  const [complaint, setComplaint] = useState("")
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState("")
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const current = await publicAppealsApi.current(signal)
+    setAppeal(current)
+    if (["assigned", "in_progress", "needs_clarification", "answer_ready", "completed", "returned"].includes(current.status)) {
+      setMessages((await publicAppealsApi.messages(signal)).messages)
+    }
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
-    publicAppealsApi
-      .current(controller.signal)
-      .then(setAppeal)
-      .catch(() => setUnavailable(true))
-      .finally(() => setLoading(false))
-    return () => controller.abort()
-  }, [])
+    const initial = window.setTimeout(() => {
+      void load(controller.signal).catch(() => setUnavailable(true)).finally(() => setLoading(false))
+    }, 0)
+    const timer = window.setInterval(() => void load().catch(() => undefined), 10_000)
+    return () => { controller.abort(); window.clearTimeout(initial); window.clearInterval(timer) }
+  }, [load])
+
+  async function act(action: () => Promise<unknown>, success: string) {
+    setBusy(true)
+    setNotice("")
+    try {
+      await action()
+      setNotice(success)
+      await load()
+    } catch {
+      setNotice("Не удалось выполнить действие. Попробуйте ещё раз.")
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function leave() {
     await publicAppealsApi.leave()
@@ -34,70 +64,19 @@ export default function CurrentAppealPage() {
   return (
     <PublicShell>
       <section className="mx-auto max-w-2xl space-y-6 py-10">
-        {loading ? (
-          <div className="rounded-3xl bg-white p-8 text-slate-600 ring-1 ring-slate-200">
-            Загружаем статус…
-          </div>
-        ) : null}
-
-        {unavailable ? (
-          <div className="space-y-4 rounded-3xl bg-white p-8 ring-1 ring-slate-200">
-            <h1 className="text-2xl font-semibold">Нужно снова ввести номер</h1>
-            <p className="leading-7 text-slate-600">
-              Временный безопасный доступ закончился или не был открыт в этом браузере.
-            </p>
-            <Link className="font-medium text-teal-700 underline" href="/appeal/check">
-              Перейти к проверке обращения
-            </Link>
-          </div>
-        ) : null}
-
-        {appeal ? (
-          <>
-            <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-9">
-              <p className="text-sm font-semibold text-teal-700">Текущий статус</p>
-              <h1 className="mt-2 text-3xl font-semibold">{appeal.status_text}</h1>
-              {appeal.category ? (
-                <p className="mt-4 text-sm text-slate-600">Тема: {appeal.category.name}</p>
-              ) : null}
-              <p className="mt-2 text-xs text-slate-500">
-                Обновлено {new Date(appeal.updated_at).toLocaleString("ru-RU")}
-              </p>
-              {appeal.rejection_reason ? (
-                <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-                  {appeal.rejection_reason}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-              <h2 className="font-semibold">История статуса</h2>
-              <ol className="mt-5 space-y-5">
-                {appeal.timeline.map((item, index) => (
-                  <li key={`${item.status}-${item.occurred_at}`} className="flex gap-4">
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm font-semibold text-teal-800">
-                      {index + 1}
-                    </span>
-                    <div>
-                      <p className="font-medium">{item.text}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {new Date(item.occurred_at).toLocaleString("ru-RU")}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-
-            {appeal.show_crisis_support ? (
-              <CrisisPanel resources={appeal.crisis_support_resources} />
-            ) : null}
-
-            <Button type="button" variant="outline" className="w-full" onClick={leave}>
-              Закрыть доступ на этом устройстве
-            </Button>
-          </>
-        ) : null}
+        {loading ? <div className="rounded-3xl bg-white p-8 text-slate-600 ring-1 ring-slate-200">Загружаем статус…</div> : null}
+        {unavailable ? <div className="space-y-4 rounded-3xl bg-white p-8 ring-1 ring-slate-200"><h1 className="text-2xl font-semibold">Нужно снова ввести номер</h1><p className="leading-7 text-slate-600">Временный безопасный доступ закончился или не был открыт в этом браузере.</p><Link className="font-medium text-teal-700 underline" href="/appeal/check">Перейти к проверке обращения</Link></div> : null}
+        {appeal ? <>
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-9"><p className="text-sm font-semibold text-teal-700">Текущий статус</p><h1 className="mt-2 text-3xl font-semibold">{appeal.status_text}</h1>{appeal.category ? <p className="mt-4 text-sm text-slate-600">Тема: {appeal.category.name}</p> : null}<p className="mt-2 text-xs text-slate-500">Обновлено {new Date(appeal.updated_at).toLocaleString("ru-RU")}</p>{appeal.rejection_reason ? <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm leading-6">{appeal.rejection_reason}</div> : null}</div>
+          <div className="rounded-2xl bg-white p-6 ring-1 ring-slate-200"><h2 className="font-semibold">История статуса</h2><ol className="mt-5 space-y-5">{appeal.timeline.map((item, index) => <li key={`${item.status}-${item.occurred_at}`} className="flex gap-4"><span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm font-semibold text-teal-800">{index + 1}</span><div><p className="font-medium">{item.text}</p><p className="mt-1 text-xs text-slate-500">{new Date(item.occurred_at).toLocaleString("ru-RU")}</p></div></li>)}</ol></div>
+          {appeal.show_crisis_support ? <CrisisPanel resources={appeal.crisis_support_resources} /> : null}
+          {messages.length || ["in_progress", "needs_clarification", "answer_ready"].includes(appeal.status) ? <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200"><h2 className="font-semibold">Диалог со специалистом</h2><div className="my-4 space-y-3">{messages.map((item) => <div key={item.id} className={`rounded-xl p-3 text-sm ${item.author_type === "applicant" ? "ml-8 bg-teal-50" : "mr-8 bg-slate-100"}`}><p className="mb-1 text-xs font-medium text-slate-500">{item.author_label}</p><p className="whitespace-pre-wrap">{item.body}</p></div>)}</div>{["in_progress", "needs_clarification"].includes(appeal.status) ? <><Textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength={5000} placeholder="Напишите специалисту"/><Button className="mt-3" disabled={busy || !message.trim()} onClick={() => void act(() => publicAppealsApi.sendMessage(message), "Сообщение отправлено.").then(() => setMessage(""))}>Отправить</Button></> : null}</section> : null}
+          {appeal.status === "answer_ready" ? <section className="space-y-3 rounded-2xl bg-teal-50 p-6 ring-1 ring-teal-200"><h2 className="font-semibold">Помогли ли рекомендации?</h2><div className="flex gap-2"><Button disabled={busy} onClick={() => void act(() => publicAppealsApi.resolve("helped"), "Спасибо! Обращение завершено.")}>Это помогло</Button></div><Textarea value={returnExplanation} onChange={(event) => setReturnExplanation(event.target.value)} maxLength={2000} placeholder="Если не помогло, расскажите, чего не хватило"/><Button variant="outline" disabled={busy || !returnExplanation.trim() || appeal.return_count >= appeal.max_returns} onClick={() => void act(() => publicAppealsApi.resolve("not_helped", returnExplanation), "Обращение возвращено оператору.")}>Это не помогло</Button>{appeal.return_count >= appeal.max_returns ? <p className="text-sm text-slate-600">Лимит возвратов исчерпан. Вы всё ещё можете оставить жалобу.</p> : null}</section> : null}
+          {["completed", "returned"].includes(appeal.status) ? <section className="space-y-3 rounded-2xl bg-white p-6 ring-1 ring-slate-200"><h2 className="font-semibold">Оценка помощи</h2><select aria-label="Оценка" value={rating} onChange={(event) => setRating(Number(event.target.value))} className="rounded-lg border p-2">{[5,4,3,2,1].map((value) => <option key={value} value={value}>{value}</option>)}</select><Textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} maxLength={2000} placeholder="Комментарий — необязательно"/><Button variant="outline" disabled={busy} onClick={() => void act(() => publicAppealsApi.feedback(rating, feedback), "Спасибо за обратную связь.")}>Отправить оценку</Button></section> : null}
+          <details className="rounded-2xl bg-white p-6 ring-1 ring-slate-200"><summary className="cursor-pointer font-semibold">Пожаловаться на работу сервиса</summary><div className="mt-4 space-y-3"><p className="text-sm text-slate-600">Жалоба не будет показана специалисту.</p><Textarea value={complaint} onChange={(event) => setComplaint(event.target.value)} maxLength={3000}/><Button variant="outline" disabled={busy || !complaint.trim()} onClick={() => void act(() => publicAppealsApi.complaint(complaint), "Жалоба принята.").then(() => setComplaint(""))}>Отправить жалобу</Button></div></details>
+          {notice ? <p className="rounded-xl bg-slate-50 p-4 text-sm">{notice}</p> : null}
+          <Button type="button" variant="outline" className="w-full" onClick={leave}>Закрыть доступ на этом устройстве</Button>
+        </> : null}
       </section>
     </PublicShell>
   )

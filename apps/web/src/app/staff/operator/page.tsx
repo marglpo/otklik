@@ -11,6 +11,7 @@ import {
   type OperatorAppealDetail,
   type OperatorQueue,
   type OperatorReference,
+  type OperatorTransferRequest,
   operatorApi,
 } from "@/lib/operator"
 
@@ -59,6 +60,9 @@ export default function OperatorWorkspacePage() {
   const [rejectKind, setRejectKind] = useState<"spam" | "outside_competence">("spam")
   const [selectedExpertId, setSelectedExpertId] = useState("")
   const [crisisContact, setCrisisContact] = useState<string | null>(null)
+  const [transfers, setTransfers] = useState<OperatorTransferRequest[]>([])
+  const [transferTargets, setTransferTargets] = useState<Record<string, string>>({})
+  const [complaints, setComplaints] = useState<Array<{ id: string; body: string }>>([])
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
 
@@ -85,6 +89,7 @@ export default function OperatorWorkspacePage() {
     async (id: string) => {
       setError("")
       setCrisisContact(null)
+      setComplaints([])
       try {
         const loaded = await operatorApi.detail(request, id)
         setDetail(loaded)
@@ -102,6 +107,7 @@ export default function OperatorWorkspacePage() {
       void Promise.all([
         loadQueue(),
         operatorApi.reference(request).then(setReference),
+        operatorApi.transferRequests(request).then(setTransfers),
       ]).catch(() => setError("Не удалось загрузить очередь оператора."))
     }, 0)
     return () => window.clearTimeout(timer)
@@ -115,6 +121,7 @@ export default function OperatorWorkspacePage() {
       await action()
       await loadQueue()
       await loadDetail(detail.id)
+      setTransfers(await operatorApi.transferRequests(request))
     } catch {
       setError("Действие не выполнено. Проверьте состояние обращения и выбранные данные.")
     } finally {
@@ -153,6 +160,7 @@ export default function OperatorWorkspacePage() {
 
       <div className="mx-auto grid max-w-7xl gap-5 p-4 sm:p-6 lg:grid-cols-[360px_1fr]">
         <aside className="space-y-4">
+          {transfers.length ? <section className="space-y-2 rounded-xl bg-indigo-50 p-3 ring-1 ring-indigo-200"><h2 className="text-sm font-semibold">Запросы на передачу</h2>{transfers.map((item) => { const selected = transferTargets[item.id] ?? item.target_expert_id ?? ""; return <div key={item.id} className="rounded-lg bg-white p-3 text-sm"><p className="font-medium">{item.request_kind === "cannot_take" ? "Не может взять обращение" : "Передача другому специалисту"}</p><p className="mt-1"><span className="font-medium">{item.requester_display_name}</span>{item.target_display_name ? ` → ${item.target_display_name}` : " — оператор выбирает замену"}</p><p className="mt-1 text-slate-600">{item.reason}</p><select aria-label="Эксперт на замену" className="mt-2 w-full rounded-lg border p-2" value={selected} onChange={(event) => setTransferTargets((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Выберите подходящего эксперта</option>{item.eligible_experts.map((candidate) => <option key={candidate.expert_id} value={candidate.expert_id} disabled={!candidate.available}>{candidate.display_name} — {candidate.current_load}/{candidate.capacity}</option>)}</select><div className="mt-2 flex gap-2"><Button size="sm" disabled={busy || !selected} onClick={() => void operatorApi.resolveTransfer(request, item.id, "approve", selected).then(async () => { setTransfers(await operatorApi.transferRequests(request)); await loadQueue() }).catch(() => setError("Не удалось подтвердить передачу."))}>Подтвердить</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void operatorApi.resolveTransfer(request, item.id, "reject").then(async () => setTransfers(await operatorApi.transferRequests(request))).catch(() => setError("Не удалось отклонить передачу."))}>Отклонить</Button></div></div> })}</section> : null}
           <div className="grid grid-cols-2 gap-2">
             {queue ? ([
               ["Требуют внимания", queue.counters.crisis, "bg-amber-50"],
@@ -186,6 +194,7 @@ export default function OperatorWorkspacePage() {
                   <h2 className="mt-5 text-lg font-semibold">Описание ситуации</h2><p className="mt-3 whitespace-pre-wrap leading-7 text-slate-700">{detail.description || "Описание не добавлено."}</p>
                 </section>
                 {Object.keys(detail.intake_answers).length ? <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Дополнительные ответы</h2><dl className="mt-4 space-y-3">{Object.entries(detail.intake_answers).map(([key, value]) => <div key={key}><dt className="text-xs text-slate-500">{intakeLabels[key] ?? key}</dt><dd className="mt-1 text-sm">{value}</dd></div>)}</dl></section> : null}
+                {detail.return_explanations.length ? <section className="rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200"><h2 className="font-semibold">Почему рекомендации не помогли</h2>{detail.return_explanations.map((item) => <p key={item.id} className="mt-3 whitespace-pre-wrap text-sm">Возврат {item.return_number}: {item.body}</p>)}</section> : null}
                 <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Вложения</h2><div className="mt-3 flex flex-wrap gap-2">{detail.attachments.length ? detail.attachments.map((item, index) => <Button key={item.id} variant="outline" onClick={() => openAttachment(item.id)}>Открыть изображение {index + 1}</Button>) : <p className="text-sm text-slate-500">Вложений нет.</p>}</div></section>
               </div>
 
@@ -204,6 +213,7 @@ export default function OperatorWorkspacePage() {
                   <Textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="Понятное заявителю объяснение" maxLength={2000} />
                   <Button variant="destructive" className="w-full" disabled={busy || !rejectReason.trim()} onClick={() => void mutate(async () => { await operatorApi.reject(request, detail.id, rejectKind, rejectReason); setRejectReason("") })}>Отклонить</Button>
                 </section>
+                <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Жалобы на сервис</h2><Button className="mt-3" variant="outline" onClick={() => void operatorApi.complaints(request, detail.id).then(setComplaints).catch(() => setError("Не удалось загрузить жалобы."))}>Показать отдельно</Button>{complaints.map((item) => <p key={item.id} className="mt-3 whitespace-pre-wrap rounded-lg bg-rose-50 p-3 text-sm">{item.body}</p>)}</section>
               </aside>
             </div>
           )}

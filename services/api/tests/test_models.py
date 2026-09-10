@@ -20,6 +20,7 @@ def test_phase_2a_defines_expected_tables() -> None:
         "appeal_messages",
         "appeal_participants",
         "appeal_rejections",
+        "appeal_return_explanations",
         "appeals",
         "assignment_history",
         "attachments",
@@ -123,3 +124,13 @@ def test_no_applicant_account_model_exists() -> None:
     table_names = set(Base.metadata.tables)
 
     assert {"applicants", "applicant_users", "anonymous_users"}.isdisjoint(table_names)
+
+
+def test_transfer_and_return_sensitive_text_use_encrypted_columns() -> None:
+    transfer_columns = set(Base.metadata.tables["transfer_requests"].columns.keys())
+    return_columns = set(Base.metadata.tables["appeal_return_explanations"].columns.keys())
+
+    assert {"encrypted_reason", "key_version"}.issubset(transfer_columns)
+    assert "reason" not in transfer_columns
+    assert {"encrypted_body", "key_version"}.issubset(return_columns)
+    assert "body" not in return_columns
