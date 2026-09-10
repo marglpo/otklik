@@ -39,6 +39,7 @@ from app.modules.admin.schemas import (
     SavedResponse,
     StaffAdminItem,
     StaffCreateRequest,
+    StaffCreateResult,
     StaffUpdateRequest,
     SupportResourceItem,
     SupportResourceRequest,
@@ -55,10 +56,10 @@ async def list_staff(admin: CurrentAdmin, service: AdminServiceDependency) -> li
     return await service.list_staff()
 
 
-@router.post("/staff", response_model=InvitationResult)
+@router.post("/staff", response_model=StaffCreateResult)
 async def create_staff(
     payload: StaffCreateRequest, admin: CurrentAdmin, service: AdminServiceDependency
-) -> InvitationResult:
+) -> StaffCreateResult:
     return await service.create_staff(payload, admin_id=admin.id)
 
 

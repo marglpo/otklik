@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends, Request, Response
 from app.core.config import Settings
 from app.core.errors import UnauthorizedError
 from app.db.models import StaffUser
-from app.modules.auth.dependencies import get_auth_service, get_current_staff
+from app.modules.auth.dependencies import get_auth_service, get_authenticated_staff
 from app.modules.auth.schemas import (
     AccessTokenResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     LoginRequest,
     LogoutResponse,
     StaffProfile,
@@ -108,7 +110,7 @@ async def logout(
 @router.get("/me", response_model=StaffProfile)
 async def me(
     response: Response,
-    staff: Annotated[StaffUser, Depends(get_current_staff)],
+    staff: Annotated[StaffUser, Depends(get_authenticated_staff)],
 ) -> StaffProfile:
     _prevent_caching(response)
     return StaffProfile(
@@ -116,4 +118,23 @@ async def me(
         login=staff.login,
         display_name=staff.display_name,
         role=staff.role,
+        must_change_password=bool(staff.must_change_password),
     )
+
+
+@router.post("/change-password", response_model=ChangePasswordResponse)
+async def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    staff: Annotated[StaffUser, Depends(get_authenticated_staff)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+) -> ChangePasswordResponse:
+    await auth_service.change_password(
+        staff.id,
+        new_password=payload.password.get_secret_value(),
+    )
+    settings = cast(Settings, request.app.state.settings)
+    _clear_refresh_cookie(response, settings)
+    _prevent_caching(response)
+    return ChangePasswordResponse()

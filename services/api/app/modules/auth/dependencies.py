@@ -31,13 +31,21 @@ def get_auth_service(
     )
 
 
-async def get_current_staff(
+async def get_authenticated_staff(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> StaffUser:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise UnauthorizedError(headers={"WWW-Authenticate": "Bearer"})
     return await auth_service.authenticate_access_token(credentials.credentials)
+
+
+async def get_current_staff(
+    staff: Annotated[StaffUser, Depends(get_authenticated_staff)],
+) -> StaffUser:
+    if staff.must_change_password:
+        raise ForbiddenError("Password change is required.")
+    return staff
 
 
 def require_any_role(*roles: StaffRole) -> Callable[..., StaffUser]:

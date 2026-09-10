@@ -19,6 +19,11 @@ export type StaffItem = {
   password_configured: boolean
 }
 
+export type StaffCreateResult = {
+  staff: StaffItem
+  temporary_password: string
+}
+
 export type ApplicantTypeItem = {
   id: string
   code: string
@@ -151,7 +156,7 @@ const json = (method: string, value?: unknown): ApiRequestOptions => ({ method, 
 export const adminApi = {
   staff: (request: StaffRequest) => request<StaffItem[]>("api/v1/admin/staff"),
   createStaff: (request: StaffRequest, value: unknown) =>
-    request<{ staff: StaffItem; email_sent: boolean; message: string }>(
+    request<StaffCreateResult>(
       "api/v1/admin/staff",
       json("POST", value)
     ),

@@ -191,6 +191,7 @@ def _staff(
         password_hash=hash_password(password),
         role=role,
         is_active=active,
+        must_change_password=False,
         display_name=f"Test {role.value}",
     )
 
@@ -448,7 +449,56 @@ async def test_auth_me_returns_safe_staff_profile(test_settings: Settings) -> No
         "login": staff.login,
         "display_name": staff.display_name,
         "role": staff.role.value,
+        "must_change_password": False,
     }
+
+
+async def test_temporary_password_requires_change_before_role_access(
+    test_settings: Settings,
+) -> None:
+    temporary_password = "TemporaryPassword2026"
+    staff = _staff(password=temporary_password)
+    staff.must_change_password = True
+    service, repository = _service(test_settings, staff)
+    result = await _login(service, staff, temporary_password)
+    app = _app(test_settings, service)
+
+    @app.get("/test-forced-password-role")
+    async def protected(
+        _staff_user: Annotated[StaffUser, Depends(require_role(StaffRole.OPERATOR))],
+    ) -> dict[str, bool]:
+        return {"ok": True}
+
+    headers = {"Authorization": f"Bearer {result.access_token}"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        blocked = await client.get("/test-forced-password-role", headers=headers)
+        me = await client.get("/api/v1/auth/me", headers=headers)
+        changed = await client.post(
+            "/api/v1/auth/change-password",
+            headers=headers,
+            json={"password": "PermanentPassword2026"},
+        )
+
+    assert result.staff.must_change_password is True
+    assert blocked.status_code == 403
+    assert me.status_code == 200
+    assert me.json()["must_change_password"] is True
+    assert changed.status_code == 200
+    assert staff.must_change_password is False
+    assert verify_password("PermanentPassword2026", staff.password_hash)
+    assert all(session.revoked_at is not None for session in repository.sessions.values())
+    with pytest.raises(UnauthorizedError):
+        await service.login(
+            login=staff.login,
+            password=temporary_password,
+            transient_ip="127.0.0.1",
+        )
+    replacement = await service.login(
+        login=staff.login,
+        password="PermanentPassword2026",
+        transient_ip="127.0.0.1",
+    )
+    assert replacement.staff.must_change_password is False
 
 
 async def test_invalid_jwt_fails(test_settings: Settings) -> None:

@@ -78,6 +78,7 @@ from app.modules.admin.schemas import (
     SafeSettingsResponse,
     StaffAdminItem,
     StaffCreateRequest,
+    StaffCreateResult,
     StaffUpdateRequest,
     SupportResourceItem,
     SupportResourceRequest,
@@ -106,44 +107,65 @@ class AdminService:
 
     async def create_staff(
         self, payload: StaffCreateRequest, *, admin_id: UUID
-    ) -> InvitationResult:
+    ) -> StaffCreateResult:
         login = normalize_login(payload.login)
         display_name = payload.display_name.strip()
         if not login or not display_name:
             raise ValidationError("Login and display name are required.")
         if await self._repository.get_staff_by_login(login):
-            raise ConflictError("A staff user with this login already exists.")
+            raise ConflictError("Такой логин уже используется.")
         if await self._repository.get_staff_by_email(payload.email):
-            raise ConflictError("A staff user with this email already exists.")
+            raise ConflictError("Сотрудник с таким email уже существует.")
+        temporary_password = self._temporary_password()
         staff = StaffUser(
             id=uuid4(),
             login=login,
             email=payload.email,
-            password_hash=None,
+            password_hash=hash_password(temporary_password),
             role=payload.role,
             is_active=True,
+            must_change_password=True,
             display_name=display_name,
         )
-        records: list[object] = [staff]
+        dependent_records: list[object] = []
         if payload.role is StaffRole.EXPERT:
-            records.append(
+            dependent_records.append(
                 ExpertProfile(
                     staff_user_id=staff.id,
                     public_specialist_label=self._clean(payload.public_specialist_label),
                     max_active_appeals=payload.max_active_appeals,
                 )
             )
-        records.append(self._audit(admin_id, "admin.staff_created", "staff_user", staff.id))
+        dependent_records.append(
+            self._audit(
+                admin_id,
+                "admin.staff_created",
+                "staff_user",
+                staff.id,
+                {"role": payload.role.value},
+            )
+        )
         try:
-            await self._repository.add_all(records)
+            # Flush the parent first. Without an ORM relationship SQLAlchemy cannot
+            # infer mapper ordering for a transient StaffUser and ExpertProfile
+            # passed to the same add_all() call, despite the table-level FK.
+            await self._repository.add(staff)
+            await self._repository.add_all(dependent_records)
             await self._repository.commit()
         except IntegrityError as exc:
             await self._repository.rollback()
-            raise ConflictError("A staff user with this login or email already exists.") from exc
-        result = await self._issue_setup(staff, admin_id, StaffInvitationPurpose.INVITATION)
-        if result.email_sent:
-            result.message = "Сотрудник создан и приглашение отправлено."
-        return result
+            constraint_name = self._integrity_constraint_name(exc)
+            if constraint_name == "staff_users_login":
+                raise ConflictError("Такой логин уже используется.") from exc
+            if constraint_name == "uq_staff_users_email":
+                raise ConflictError("Сотрудник с таким email уже существует.") from exc
+            raise InfrastructureError(
+                "Не удалось создать сотрудника из-за конфликта целостности данных."
+            ) from exc
+        return StaffCreateResult(
+            staff=await self._staff_item(staff),
+            temporary_password=temporary_password,
+        )
 
     async def update_staff(
         self, staff_id: UUID, payload: StaffUpdateRequest, *, admin_id: UUID
@@ -247,6 +269,7 @@ class AdminService:
         if staff is None or not staff.is_active:
             raise UnauthorizedError("The setup link is invalid or expired.")
         staff.password_hash = hash_password(new_password)
+        staff.must_change_password = False
         invitation.consumed_at = now
         await self._repository.revoke_sessions(staff.id, now)
         await self._repository.add_audit(
@@ -881,6 +904,33 @@ class AdminService:
     @staticmethod
     def _optional_float(value: object) -> float | None:
         return float(value) if value is not None else None
+
+    @staticmethod
+    def _temporary_password(length: int = 16) -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    @staticmethod
+    def _integrity_constraint_name(exc: IntegrityError) -> str | None:
+        pending: list[object] = [exc, exc.orig]
+        visited: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in visited:
+                continue
+            visited.add(id(current))
+            name = getattr(current, "constraint_name", None)
+            if isinstance(name, str):
+                return name
+            diagnostics = getattr(current, "diag", None)
+            diagnostic_name = getattr(diagnostics, "constraint_name", None)
+            if isinstance(diagnostic_name, str):
+                return diagnostic_name
+            for attribute in ("orig", "__cause__", "__context__"):
+                nested = getattr(current, attribute, None)
+                if nested is not None:
+                    pending.append(nested)
+        return None
 
     @staticmethod
     def _seconds(start: datetime, end: datetime | None) -> int | str:

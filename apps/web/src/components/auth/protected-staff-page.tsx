@@ -26,6 +26,8 @@ export function ProtectedStaffPage({
   useEffect(() => {
     if (status === "anonymous") {
       router.replace("/staff/login")
+    } else if (status === "authenticated" && staff?.must_change_password) {
+      router.replace("/staff/change-password")
     } else if (
       status === "authenticated" &&
       staff &&

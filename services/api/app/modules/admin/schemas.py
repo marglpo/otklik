@@ -79,6 +79,13 @@ class StaffAdminItem(BaseModel):
     password_configured: bool
 
 
+class StaffCreateResult(BaseModel):
+    """One-time provisioning secret; never use this schema for list/detail responses."""
+
+    staff: StaffAdminItem
+    temporary_password: str
+
+
 class InvitationResult(BaseModel):
     staff: StaffAdminItem
     email_sent: bool

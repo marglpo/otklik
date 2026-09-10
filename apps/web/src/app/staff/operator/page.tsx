@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
+import { StaffHeader } from "@/components/staff/staff-header"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import {
@@ -74,7 +75,9 @@ export default function OperatorWorkspacePage() {
 
   useEffect(() => {
     if (status === "anonymous") router.replace("/staff/login")
-    if (status === "authenticated" && staff?.role !== "operator") {
+    if (status === "authenticated" && staff?.must_change_password) {
+      router.replace("/staff/change-password")
+    } else if (status === "authenticated" && staff?.role !== "operator") {
       router.replace(`/staff/${staff?.role}`)
     }
   }, [router, staff, status])
@@ -108,7 +111,7 @@ export default function OperatorWorkspacePage() {
   )
 
   useEffect(() => {
-    if (status !== "authenticated" || staff?.role !== "operator") return
+    if (status !== "authenticated" || staff?.role !== "operator" || staff.must_change_password) return
     const timer = window.setTimeout(() => {
       void Promise.all([
         loadQueue(),
@@ -156,13 +159,8 @@ export default function OperatorWorkspacePage() {
   const regularItems = queue?.items.filter((item) => !item.crisis_flag) ?? []
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-950">
-      <header className="border-b bg-white px-4 py-4 sm:px-6">
-        <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <div><p className="text-sm font-semibold text-teal-700">Отклик</p><h1 className="text-xl font-semibold">Рабочее место оператора</h1></div>
-          <Button variant="outline" onClick={() => void logout().finally(() => router.replace("/staff/login"))}>Выйти</Button>
-        </div>
-      </header>
+    <main className="staff-workspace">
+      <StaffHeader title="Очередь обращений" role="Оператор" name={staff.display_name} onLogout={() => { void logout().finally(() => router.replace("/staff/login")) }} />
 
       <div className="mx-auto grid max-w-7xl gap-5 p-4 sm:p-6 lg:grid-cols-[360px_1fr]">
         <aside className="space-y-4">
@@ -177,7 +175,7 @@ export default function OperatorWorkspacePage() {
               <div key={label} className={`rounded-xl p-3 ring-1 ring-slate-200 ${style}`}><p className="text-2xl font-semibold">{value}</p><p className="text-xs">{label}</p></div>
             )) : null}
           </div>
-          <div className="grid grid-cols-2 gap-2 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+          <div className="staff-card grid grid-cols-2 gap-2 p-3">
             <select aria-label="Статус" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-lg border p-2 text-sm">
               <option value="">Новые и возвращённые</option><option value="new">Новые</option><option value="returned">Возвращённые</option>
             </select>
@@ -192,20 +190,20 @@ export default function OperatorWorkspacePage() {
 
         <section className="min-w-0">
           {error ? <p className="mb-4 rounded-xl bg-rose-50 p-4 text-sm text-rose-800">{error}</p> : null}
-          {!detail ? <div className="rounded-2xl bg-white p-10 text-center text-slate-500 ring-1 ring-slate-200">Выберите обращение в очереди.</div> : (
+          {!detail ? <div className="staff-card p-10 text-center text-slate-500">Выберите обращение в очереди.</div> : (
             <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
               <div className="space-y-5">
-                <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+                <section className="staff-card p-5 sm:p-6">
                   <div className="flex flex-wrap gap-2 text-xs"><span>{applicantTypes[detail.applicant_type] ?? detail.applicant_type}</span><span>{statuses[detail.status] ?? detail.status}</span><span>ожидает {waiting(detail.waiting_seconds)}</span>{detail.crisis_flag ? <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-900">Требует внимания</span> : null}</div>
                   <h2 className="mt-5 text-lg font-semibold">Описание ситуации</h2><p className="mt-3 whitespace-pre-wrap leading-7 text-slate-700">{detail.description || "Описание не добавлено."}</p>
                 </section>
-                {Object.keys(detail.intake_answers).length ? <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Дополнительные ответы</h2><dl className="mt-4 space-y-3">{Object.entries(detail.intake_answers).map(([key, value]) => <div key={key}><dt className="text-xs text-slate-500">{intakeLabels[key] ?? key}</dt><dd className="mt-1 text-sm">{renderAnswer(value)}</dd></div>)}</dl></section> : null}
+                {Object.keys(detail.intake_answers).length ? <section className="staff-card p-5"><h2 className="font-semibold">Дополнительные ответы</h2><dl className="mt-4 space-y-3">{Object.entries(detail.intake_answers).map(([key, value]) => <div key={key}><dt className="text-xs text-slate-500">{intakeLabels[key] ?? key}</dt><dd className="mt-1 text-sm">{renderAnswer(value)}</dd></div>)}</dl></section> : null}
                 {detail.return_explanations.length ? <section className="rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200"><h2 className="font-semibold">Почему рекомендации не помогли</h2>{detail.return_explanations.map((item) => <p key={item.id} className="mt-3 whitespace-pre-wrap text-sm">Возврат {item.return_number}: {item.body}</p>)}</section> : null}
-                <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Вложения</h2><div className="mt-3 flex flex-wrap gap-2">{detail.attachments.length ? detail.attachments.map((item, index) => <Button key={item.id} variant="outline" onClick={() => openAttachment(item.id)}>Открыть изображение {index + 1}</Button>) : <p className="text-sm text-slate-500">Вложений нет.</p>}</div></section>
+                <section className="staff-card p-5"><h2 className="font-semibold">Вложения</h2><div className="mt-3 flex flex-wrap gap-2">{detail.attachments.length ? detail.attachments.map((item, index) => <Button key={item.id} variant="outline" onClick={() => openAttachment(item.id)}>Открыть изображение {index + 1}</Button>) : <p className="text-sm text-slate-500">Вложений нет.</p>}</div></section>
               </div>
 
               <aside className="space-y-4">
-                <section className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+                <section className="staff-card space-y-4 border-t-4 border-t-teal-600 p-5">
                   <h2 className="font-semibold">Триаж и маршрутизация</h2>
                   <label className="block text-sm"><span className="mb-1 block text-slate-600">Категория</span><select value={detail.category?.id ?? ""} disabled={busy} onChange={(event) => void mutate(() => operatorApi.triage(request, detail.id, { category_id: event.target.value }))} className="w-full rounded-lg border p-2"><option value="" disabled>Выберите</option>{reference?.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
                   <label className="block text-sm"><span className="mb-1 block text-slate-600">Приоритет</span><select value={detail.priority} disabled={busy} onChange={(event) => void mutate(() => operatorApi.triage(request, detail.id, { priority: event.target.value as AppealPriority }))} className="w-full rounded-lg border p-2">{Object.entries(priorities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -214,12 +212,12 @@ export default function OperatorWorkspacePage() {
                   <Button className="w-full" disabled={busy || !selectedExpertId || !detail.routing.candidates.some((candidate) => candidate.expert_id === selectedExpertId && candidate.available)} onClick={() => void mutate(() => operatorApi.assign(request, detail.id, selectedExpertId))}>Назначить эксперта</Button>
                 </section>
                 {detail.crisis_flag ? <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5"><h2 className="font-semibold">Кризисный контакт</h2>{crisisContact ? <p className="mt-3 break-words rounded-lg bg-white p-3 text-sm">{crisisContact}</p> : <Button className="mt-3" variant="outline" onClick={async () => { try { setCrisisContact((await operatorApi.crisisContact(request, detail.id)).contact) } catch { setError("Контакт не указан или недоступен.") } }}>Показать отдельно</Button>}</section> : null}
-                <section className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+                <section className="staff-card space-y-3 p-5">
                   <h2 className="font-semibold">Отклонить обращение</h2><select value={rejectKind} onChange={(event) => setRejectKind(event.target.value as typeof rejectKind)} className="w-full rounded-lg border p-2 text-sm"><option value="spam">Спам</option><option value="outside_competence">Вне компетенции</option></select>
                   <Textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="Понятное заявителю объяснение" maxLength={2000} />
                   <Button variant="destructive" className="w-full" disabled={busy || !rejectReason.trim()} onClick={() => void mutate(async () => { await operatorApi.reject(request, detail.id, rejectKind, rejectReason); setRejectReason("") })}>Отклонить</Button>
                 </section>
-                <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Жалобы на сервис</h2><Button className="mt-3" variant="outline" onClick={() => void operatorApi.complaints(request, detail.id).then(setComplaints).catch(() => setError("Не удалось загрузить жалобы."))}>Показать отдельно</Button>{complaints.map((item) => <p key={item.id} className="mt-3 whitespace-pre-wrap rounded-lg bg-rose-50 p-3 text-sm">{item.body}</p>)}</section>
+                <section className="staff-card p-5"><h2 className="font-semibold">Жалобы на сервис</h2><Button className="mt-3" variant="outline" onClick={() => void operatorApi.complaints(request, detail.id).then(setComplaints).catch(() => setError("Не удалось загрузить жалобы."))}>Показать отдельно</Button>{complaints.map((item) => <p key={item.id} className="mt-3 whitespace-pre-wrap rounded-lg bg-rose-50 p-3 text-sm">{item.body}</p>)}</section>
               </aside>
             </div>
           )}
@@ -231,5 +229,5 @@ export default function OperatorWorkspacePage() {
 
 function QueueBlock({ title, items, selectedId, onOpen }: { title: string; items: OperatorQueue["items"]; selectedId?: string; onOpen: (id: string) => Promise<void> }) {
   if (!items.length) return null
-  return <section className="space-y-2"><h2 className="text-sm font-semibold text-slate-600">{title}</h2>{items.map((item) => <button key={item.id} type="button" onClick={() => void onOpen(item.id)} className={`w-full rounded-xl p-4 text-left ring-1 ${selectedId === item.id ? "bg-teal-50 ring-teal-500" : "bg-white ring-slate-200"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium">{item.category?.name ?? "Категория не выбрана"}</span><span className="text-xs text-slate-500">{waiting(item.waiting_seconds)}</span></div><div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600"><span>{applicantTypes[item.applicant_type] ?? item.applicant_type}</span><span>{statuses[item.status] ?? item.status}</span><span>{priorities[item.priority]}</span>{item.is_overdue ? <span className="text-rose-700">Просрочено</span> : null}</div></button>)}</section>
+  return <section className="space-y-2"><div className="flex items-center justify-between"><h2 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</h2><span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">{items.length}</span></div>{items.map((item) => <button key={item.id} type="button" onClick={() => void onOpen(item.id)} className={`w-full rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selectedId === item.id ? "border-teal-400 bg-teal-50 ring-2 ring-teal-200" : item.crisis_flag || item.priority === "urgent" ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium">{item.category?.name ?? "Категория не выбрана"}</span><span className="shrink-0 text-xs text-slate-500">{waiting(item.waiting_seconds)}</span></div><div className="mt-2 flex flex-wrap gap-1.5 text-xs"><span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{applicantTypes[item.applicant_type] ?? item.applicant_type}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{statuses[item.status] ?? item.status}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{priorities[item.priority]}</span>{item.is_overdue ? <span className="rounded-full bg-rose-100 px-2 py-1 font-medium text-rose-700">Просрочено</span> : null}</div></button>)}</section>
 }

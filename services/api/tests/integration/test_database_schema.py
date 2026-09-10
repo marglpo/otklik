@@ -28,7 +28,7 @@ from app.db.models import (
 )
 
 API_ROOT = Path(__file__).resolve().parents[2]
-CURRENT_REVISION = "20260910_0006"
+CURRENT_REVISION = "20260910_0007"
 
 
 def _run_upgrade(connection: Connection) -> None:

@@ -141,15 +141,15 @@ export default function NewAppealPage() {
   if (created) {
     return (
       <PublicShell>
-        <section className="mx-auto max-w-2xl space-y-6 py-10">
-          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-9">
+        <section className="mx-auto max-w-2xl space-y-6 py-8 sm:py-12">
+          <div className="surface-card p-6 sm:p-9">
             <p className="font-medium text-teal-700">Обращение принято</p>
             <h1 className="mt-2 text-3xl font-semibold">Сохраните этот номер</h1>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               Сервис не сможет восстановить номер. Он не сохранён в браузере и не
               находится в адресе страницы.
             </p>
-            <div className="my-6 rounded-2xl bg-slate-950 p-5 text-center font-mono text-2xl tracking-wider text-white sm:text-4xl">
+            <div className="my-6 rounded-2xl bg-slate-950 p-5 text-center font-mono text-2xl tracking-[0.12em] text-white shadow-inner sm:text-4xl">
               {created.track_number}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -184,7 +184,7 @@ export default function NewAppealPage() {
           {created.show_crisis_support ? (
             <>
               <CrisisPanel resources={created.crisis_support_resources} />
-              <div className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+              <div className="surface-card space-y-3 p-5">
                 <h2 className="font-semibold">Оставить контакт для экстренной связи — необязательно</h2>
                 <p className="text-sm leading-6 text-slate-600">
                   Контакт будет зашифрован и сохранён отдельно. Это уменьшает
@@ -218,14 +218,15 @@ export default function NewAppealPage() {
 
   return (
     <PublicShell>
-      <form onSubmit={submit} className="mx-auto max-w-3xl space-y-7 py-8">
-        <div>
+      <form onSubmit={submit} className="mx-auto max-w-3xl space-y-7 py-8 sm:py-12">
+        <div className="space-y-3">
+          <div className="flex items-center gap-3"><span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-800">Шаг 1 из 1</span><span className="text-xs text-slate-500">Обычно 3–5 минут</span></div>
           <p className="text-sm font-semibold text-teal-700">Новое обращение</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">Расскажите, что произошло</h1>
           <p className="mt-2 text-slate-600">Все вопросы ниже, кроме выбора типа и темы/описания, необязательны.</p>
         </div>
 
-        <fieldset className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+        <fieldset className="surface-card space-y-3 p-5 sm:p-6">
           <legend className="px-1 font-semibold">Кто обращается?</legend>
           <div className="grid gap-2 sm:grid-cols-3">
             {reference?.applicant_types.map((item) => (
@@ -245,7 +246,7 @@ export default function NewAppealPage() {
           </div>
         </fieldset>
 
-        <section className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+        <section className="surface-card space-y-4 p-5 sm:p-6">
           <h2 className="font-semibold">Как удобнее рассказать?</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             {([
@@ -306,7 +307,7 @@ export default function NewAppealPage() {
           )}
         </section>
 
-        <section className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+        <section className="surface-card space-y-4 p-5 sm:p-6">
           <div>
             <h2 className="font-semibold">Несколько уточнений</h2>
             <p className="text-sm text-slate-600">Можно пропустить любой вопрос.</p>
@@ -410,7 +411,7 @@ export default function NewAppealPage() {
             })}
         </section>
 
-        <section className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+        <section className="surface-card space-y-3 p-5 sm:p-6">
           <Label htmlFor="attachments">Скриншоты или изображения (необязательно)</Label>
           <Input
             id="attachments"

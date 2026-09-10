@@ -63,6 +63,7 @@ class StaffManagementService:
             raise ValidationError("A new password is required.")
         staff = await self._get_staff(staff_user_id)
         staff.password_hash = hash_password(new_password)
+        staff.must_change_password = False
         await self._repository.revoke_all_sessions(staff.id, revoked_at=datetime.now(UTC))
         await self._repository.commit()
 

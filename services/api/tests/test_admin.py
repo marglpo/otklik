@@ -4,9 +4,10 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import IntegrityError
 
 from app.core.email import SMTPMailer
-from app.core.errors import InfrastructureError, UnauthorizedError, ValidationError
+from app.core.errors import ConflictError, InfrastructureError, UnauthorizedError, ValidationError
 from app.core.security.passwords import verify_password
 from app.db.models import (
     ApplicantTypeConfig,
@@ -155,6 +156,47 @@ class FakeAdminRepository:
         return None
 
 
+class ForeignKeyOrderCheckingRepository(FakeAdminRepository):
+    """Model PostgreSQL's requirement that an expert profile parent exists first."""
+
+    async def add_all(self, records):
+        for record in records:
+            if isinstance(record, ExpertProfile) and record.staff_user_id not in self.staff:
+                raise AssertionError("ExpertProfile was flushed before StaffUser")
+        await super().add_all(records)
+
+
+class ConstraintFailure(Exception):
+    def __init__(self, constraint_name: str) -> None:
+        self.constraint_name = constraint_name
+        super().__init__("simulated database integrity violation")
+
+
+class IntegrityFailingRepository(FakeAdminRepository):
+    def __init__(self, constraint_name: str) -> None:
+        super().__init__()
+        self.constraint_name = constraint_name
+
+    async def add(self, record):
+        del record
+        raise IntegrityError(
+            "INSERT INTO staff_users (...) VALUES (...)",
+            {},
+            ConstraintFailure(self.constraint_name),
+        )
+
+
+class ProfileIntegrityFailingRepository(ForeignKeyOrderCheckingRepository):
+    async def add_all(self, records):
+        if any(isinstance(record, ExpertProfile) for record in records):
+            raise IntegrityError(
+                "INSERT INTO expert_profiles (...) VALUES (...)",
+                {},
+                ConstraintFailure("expert_profiles_positive_capacity"),
+            )
+        await super().add_all(records)
+
+
 def _service(test_settings, *, fail_mail=False):
     repository = FakeAdminRepository()
     mailer = FakeMailer(fail=fail_mail)
@@ -175,23 +217,91 @@ def _staff_payload(*, role=StaffRole.OPERATOR, email="new@example.org"):
     )
 
 
-async def test_staff_invitation_stores_only_digest_and_creates_expert_profile(
+async def test_staff_creation_returns_one_time_password_and_creates_expert_profile(
     test_settings,
 ) -> None:
     service, repository, mailer = _service(test_settings)
     result = await service.create_staff(_staff_payload(role=StaffRole.EXPERT), admin_id=uuid4())
 
     staff = result.staff
-    invitation = repository.invitations[0]
-    raw_token = cast(str, mailer.messages[0]["raw_token"])
     assert staff.login == "new_staff"
-    assert staff.password_configured is False
+    assert staff.password_configured is True
     assert staff.public_specialist_label == "Психолог"
     assert staff.max_active_appeals == 7
-    assert invitation.token_digest != raw_token.encode()
-    assert raw_token not in repr(invitation)
-    assert len(invitation.token_digest) == 32
-    assert "raw_token" not in (repository.audits[-1].metadata_json or {})
+    assert len(result.temporary_password) == 16
+    assert verify_password(result.temporary_password, repository.staff[staff.id].password_hash)
+    assert repository.staff[staff.id].password_hash != result.temporary_password
+    assert repository.staff[staff.id].must_change_password is True
+    assert repository.invitations == []
+    assert mailer.messages == []
+    assert result.temporary_password not in repr(repository.audits)
+    assert repository.audits[-1].metadata_json == {"role": "expert"}
+
+
+@pytest.mark.parametrize("role", [StaffRole.OPERATOR, StaffRole.ADMIN])
+async def test_direct_nonexpert_staff_creation_succeeds(test_settings, role: StaffRole) -> None:
+    service, repository, _mailer = _service(test_settings)
+
+    result = await service.create_staff(_staff_payload(role=role), admin_id=uuid4())
+
+    assert result.staff.role is role
+    assert result.staff.id in repository.staff
+    assert repository.profiles == {}
+
+
+async def test_direct_expert_flushes_staff_before_exactly_one_profile(test_settings) -> None:
+    repository = ForeignKeyOrderCheckingRepository()
+    service = AdminService(
+        cast(AdminRepository, repository), test_settings, cast(SMTPMailer, FakeMailer())
+    )
+
+    result = await service.create_staff(
+        _staff_payload(role=StaffRole.EXPERT), admin_id=uuid4()
+    )
+
+    assert list(repository.profiles) == [result.staff.id]
+    profile = repository.profiles[result.staff.id]
+    assert profile.public_specialist_label == "Психолог"
+    assert profile.max_active_appeals == 7
+    assert repository.staff[result.staff.id].must_change_password is True
+    assert verify_password(
+        result.temporary_password,
+        repository.staff[result.staff.id].password_hash,
+    )
+
+
+@pytest.mark.parametrize(
+    ("constraint_name", "message"),
+    [
+        ("staff_users_login", "Такой логин уже используется."),
+        ("uq_staff_users_email", "Сотрудник с таким email уже существует."),
+    ],
+)
+async def test_staff_unique_constraint_races_have_specific_messages(
+    test_settings, constraint_name: str, message: str
+) -> None:
+    repository = IntegrityFailingRepository(constraint_name)
+    service = AdminService(
+        cast(AdminRepository, repository), test_settings, cast(SMTPMailer, FakeMailer())
+    )
+
+    with pytest.raises(ConflictError, match=message):
+        await service.create_staff(_staff_payload(), admin_id=uuid4())
+
+
+async def test_unrelated_profile_integrity_error_is_not_a_credential_conflict(
+    test_settings,
+) -> None:
+    repository = ProfileIntegrityFailingRepository()
+    service = AdminService(
+        cast(AdminRepository, repository), test_settings, cast(SMTPMailer, FakeMailer())
+    )
+
+    with pytest.raises(InfrastructureError) as caught:
+        await service.create_staff(_staff_payload(role=StaffRole.EXPERT), admin_id=uuid4())
+
+    assert "логин" not in caught.value.message
+    assert "email" not in caught.value.message
 
 
 async def test_password_setup_is_one_time_argon2_and_reset_revokes_sessions(
@@ -199,6 +309,7 @@ async def test_password_setup_is_one_time_argon2_and_reset_revokes_sessions(
 ) -> None:
     service, repository, mailer = _service(test_settings)
     created = await service.create_staff(_staff_payload(), admin_id=uuid4())
+    await service.send_invitation(created.staff.id, admin_id=uuid4(), reset=True)
     staff = repository.staff[created.staff.id]
     session = StaffSession(
         id=uuid4(),
@@ -220,7 +331,8 @@ async def test_password_setup_is_one_time_argon2_and_reset_revokes_sessions(
 
 async def test_expired_invitation_is_rejected(test_settings) -> None:
     service, repository, mailer = _service(test_settings)
-    await service.create_staff(_staff_payload(), admin_id=uuid4())
+    created = await service.create_staff(_staff_payload(), admin_id=uuid4())
+    await service.send_invitation(created.staff.id, admin_id=uuid4(), reset=True)
     repository.invitations[0].expires_at = datetime.now(UTC) - timedelta(seconds=1)
     with pytest.raises(UnauthorizedError):
         await service.setup_password(
@@ -228,12 +340,41 @@ async def test_expired_invitation_is_rejected(test_settings) -> None:
         )
 
 
-async def test_smtp_failure_is_controlled_after_staff_is_saved(test_settings) -> None:
+async def test_staff_creation_does_not_depend_on_smtp(test_settings) -> None:
     service, repository, _mailer = _service(test_settings, fail_mail=True)
     result = await service.create_staff(_staff_payload(), admin_id=uuid4())
-    assert result.email_sent is False
     assert result.staff.id in repository.staff
-    assert repository.invitations
+    assert result.temporary_password
+    assert repository.invitations == []
+
+
+async def test_smtp_failure_remains_controlled_for_legacy_reset(test_settings) -> None:
+    service, _repository, _mailer = _service(test_settings, fail_mail=True)
+    created = await service.create_staff(_staff_payload(), admin_id=uuid4())
+    result = await service.send_invitation(created.staff.id, admin_id=uuid4(), reset=True)
+    assert result.email_sent is False
+
+
+async def test_staff_create_conflicts_are_specific_and_safe(test_settings) -> None:
+    service, _repository, _mailer = _service(test_settings)
+    await service.create_staff(_staff_payload(), admin_id=uuid4())
+    with pytest.raises(ConflictError, match="Такой логин уже используется"):
+        await service.create_staff(_staff_payload(email="other@example.org"), admin_id=uuid4())
+    duplicate_email = _staff_payload(email="new@example.org").model_copy(
+        update={"login": "different_login"}
+    )
+    with pytest.raises(ConflictError, match="Сотрудник с таким email уже существует"):
+        await service.create_staff(duplicate_email, admin_id=uuid4())
+
+
+async def test_staff_list_schema_never_contains_password_material(test_settings) -> None:
+    service, _repository, _mailer = _service(test_settings)
+    created = await service.create_staff(_staff_payload(), admin_id=uuid4())
+    listed = await service.list_staff()
+    serialized = repr([item.model_dump() for item in listed])
+    assert created.temporary_password not in serialized
+    assert "temporary_password" not in serialized
+    assert "password_hash" not in serialized
 
 
 async def test_changing_expert_role_hides_expert_only_configuration(test_settings) -> None:

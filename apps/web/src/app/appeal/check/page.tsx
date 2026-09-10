@@ -34,10 +34,10 @@ export default function CheckAppealPage() {
     <PublicShell>
       <form
         onSubmit={submit}
-        className="mx-auto mt-10 max-w-lg space-y-5 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-9"
+        className="surface-card mx-auto mt-10 max-w-lg space-y-6 p-6 sm:mt-16 sm:p-9"
       >
         <div>
-          <p className="text-sm font-semibold text-teal-700">Проверка обращения</p>
+          <p className="text-xs font-semibold tracking-[0.14em] text-teal-700 uppercase">Безопасный доступ</p>
           <h1 className="mt-2 text-3xl font-semibold">Введите сохранённый номер</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
             Номер используется только для этой проверки и не появится в адресе страницы.
@@ -54,7 +54,7 @@ export default function CheckAppealPage() {
             spellCheck={false}
             maxLength={40}
             required
-            className="h-12 font-mono text-lg tracking-wider"
+            className="h-14 text-center font-mono text-lg tracking-[0.12em]"
           />
         </div>
         {error ? <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-800">{error}</p> : null}

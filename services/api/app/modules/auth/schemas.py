@@ -15,6 +15,7 @@ class StaffProfile(BaseModel):
     login: str
     display_name: str
     role: StaffRole
+    must_change_password: bool
 
 
 class AccessTokenResponse(BaseModel):
@@ -26,3 +27,11 @@ class AccessTokenResponse(BaseModel):
 
 class LogoutResponse(BaseModel):
     status: str = "ok"
+
+
+class ChangePasswordRequest(BaseModel):
+    password: SecretStr = Field(min_length=12, max_length=200)
+
+
+class ChangePasswordResponse(BaseModel):
+    status: str = "password_changed"

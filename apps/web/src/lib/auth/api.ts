@@ -7,6 +7,7 @@ export type StaffProfile = {
   login: string
   display_name: string
   role: StaffRole
+  must_change_password: boolean
 }
 
 export type AuthResponse = {

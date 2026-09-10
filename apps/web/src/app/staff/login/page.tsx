@@ -25,7 +25,7 @@ export default function StaffLoginPage() {
 
   useEffect(() => {
     if (status === "authenticated" && staff) {
-      router.replace(staffHome(staff.role))
+      router.replace(staff.must_change_password ? "/staff/change-password" : staffHome(staff.role))
     }
   }, [router, staff, status])
 
@@ -36,25 +36,26 @@ export default function StaffLoginPage() {
     try {
       const profile = await login(loginValue, password)
       setPassword("")
-      router.replace(staffHome(profile.role))
+      router.replace(profile.must_change_password ? "/staff/change-password" : staffHome(profile.role))
     } catch {
-      setError("Unable to sign in with those credentials.")
+      setError("Не удалось войти. Проверьте логин и пароль.")
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <main className="m-auto w-full max-w-md p-6">
-      <Card>
+    <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#d9f5ec,transparent_35%),linear-gradient(#f9fffc,#f2f5f6)] p-4">
+      <Card className="w-full max-w-md border-slate-200/80 shadow-[0_30px_80px_-45px_rgba(15,23,42,.5)]">
         <CardHeader>
-          <CardTitle>Staff sign in</CardTitle>
-          <CardDescription>For authorized Otklik staff only.</CardDescription>
+          <div className="mb-3 flex size-11 items-center justify-center rounded-2xl bg-teal-700 font-semibold text-white">О</div>
+          <CardTitle className="text-2xl">Вход для сотрудников</CardTitle>
+          <CardDescription>Защищённое рабочее пространство Отклика.</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
-              <Label htmlFor="login">Login</Label>
+              <Label htmlFor="login">Логин</Label>
               <Input
                 id="login"
                 name="login"
@@ -65,7 +66,7 @@ export default function StaffLoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Пароль</Label>
               <Input
                 id="password"
                 name="password"
@@ -82,7 +83,7 @@ export default function StaffLoginPage() {
               </p>
             ) : null}
             <Button className="w-full" type="submit" disabled={submitting}>
-              {submitting ? "Signing in…" : "Sign in"}
+              {submitting ? "Входим…" : "Войти"}
             </Button>
           </form>
         </CardContent>

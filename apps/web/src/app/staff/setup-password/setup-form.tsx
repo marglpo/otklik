@@ -36,8 +36,8 @@ export function SetupPasswordForm({ token }: { token: string }) {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-50 p-4">
-      <Card className="w-full max-w-md">
+    <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#d9f5ec,transparent_35%),linear-gradient(#f9fffc,#f2f5f6)] p-4">
+      <Card className="w-full max-w-md border-slate-200/80 shadow-[0_30px_80px_-45px_rgba(15,23,42,.5)]">
         <CardHeader><CardTitle>Настройка пароля</CardTitle></CardHeader>
         <CardContent>
           {done ? (

@@ -1,11 +1,11 @@
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.core.config import Settings
 from app.core.crypto.hmac import refresh_token_digest
-from app.core.errors import InfrastructureError, UnauthorizedError
+from app.core.errors import InfrastructureError, UnauthorizedError, ValidationError
 from app.core.security.passwords import hash_password, verify_password
 from app.core.security.tokens import AUTHENTICATION_ERROR, AccessTokenService
 from app.db.models import StaffSession, StaffUser
@@ -120,6 +120,18 @@ class AuthService:
             raise UnauthorizedError(AUTHENTICATION_ERROR)
         return staff
 
+    async def change_password(self, staff_user_id: UUID, *, new_password: str) -> None:
+        if len(new_password) < 12:
+            raise ValidationError("Password must contain at least 12 characters.")
+        staff = await self._repository.get_staff_by_id(staff_user_id)
+        if staff is None or not staff.is_active:
+            raise UnauthorizedError(AUTHENTICATION_ERROR)
+        now = datetime.now(UTC)
+        staff.password_hash = hash_password(new_password)
+        staff.must_change_password = False
+        await self._repository.revoke_all_sessions(staff.id, revoked_at=now)
+        await self._repository.commit()
+
     def _digest_refresh_token(self, raw_refresh_token: str) -> bytes:
         return refresh_token_digest(self._refresh_secret, raw_refresh_token)
 
@@ -145,5 +157,6 @@ class AuthService:
                 login=staff.login,
                 display_name=staff.display_name,
                 role=staff.role,
+                must_change_password=bool(staff.must_change_password),
             ),
         )
