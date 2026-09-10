@@ -56,10 +56,10 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#d9f5ec,transparent_35%),linear-gradient(#f9fffc,#f2f5f6)] p-4">
-      <Card className="w-full max-w-md border-slate-200/80 shadow-[0_30px_80px_-45px_rgba(15,23,42,.5)]">
+    <main className="grid min-h-screen place-items-center bg-[#f5f6fa] p-4">
+      <Card className="w-full max-w-md border-slate-200 shadow-[0_20px_50px_-35px_rgba(30,41,59,.35)]">
         <CardHeader>
-          <div className="mb-3 flex size-11 items-center justify-center rounded-2xl bg-teal-700 font-semibold text-white">О</div>
+          <div className="mb-3 flex size-11 items-center justify-center rounded-xl bg-indigo-600 font-semibold text-white shadow-sm">О</div>
           <CardTitle>Измените временный пароль</CardTitle>
           <CardDescription>
             Перед началом работы задайте постоянный пароль длиной не менее 12 символов.
@@ -75,7 +75,7 @@ export default function ChangePasswordPage() {
               <Label htmlFor="confirm-password">Повторите пароль</Label>
               <Input id="confirm-password" type="password" autoComplete="new-password" minLength={12} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
             </div>
-            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+            {error ? <p role="alert" className="state-error">{error}</p> : null}
             <Button type="submit" className="w-full" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</Button>
           </form>
         </CardContent>
