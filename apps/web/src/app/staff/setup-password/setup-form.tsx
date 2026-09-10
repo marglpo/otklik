@@ -3,6 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 
+import { OtklikLogo } from "@/components/brand/otklik-logo"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -38,7 +39,7 @@ export function SetupPasswordForm({ token }: { token: string }) {
   return (
     <main className="grid min-h-screen place-items-center bg-[#f5f6fa] p-4">
       <Card className="w-full max-w-md border-slate-200 shadow-[0_20px_50px_-35px_rgba(30,41,59,.35)]">
-        <CardHeader><CardTitle>Настройка пароля</CardTitle></CardHeader>
+        <CardHeader><OtklikLogo className="mb-3" size={42} /><CardTitle className="text-xl">Настройка пароля</CardTitle></CardHeader>
         <CardContent>
           {done ? (
             <div className="space-y-4">

@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
+import { OtklikLogo } from "@/components/brand/otklik-logo"
 import { Button } from "@/components/ui/button"
 
 export type StaffNavigationItem = {
@@ -46,14 +47,9 @@ const navigationIcons: Record<string, LucideIcon> = {
 
 function Brand() {
   return (
-    <div className="flex items-center gap-3">
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white shadow-sm">
-        О
-      </span>
-      <div>
-        <p className="text-base font-semibold tracking-tight text-slate-950">Отклик</p>
-        <p className="text-[11px] text-slate-500">Защищённая платформа</p>
-      </div>
+    <div>
+      <OtklikLogo size={42} />
+      <p className="mt-1 pl-[54px] text-xs text-slate-500">Защищённая платформа</p>
     </div>
   )
 }
@@ -87,8 +83,8 @@ export function StaffHeader({
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-slate-200 bg-white lg:flex">
-        <div className="border-b border-slate-100 px-5 py-5">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-62 flex-col border-r border-slate-200 bg-white lg:flex">
+        <div className="border-b border-slate-100 px-6 py-6">
           <Brand />
         </div>
         <div className="px-5 pb-2 pt-5">
@@ -134,8 +130,10 @@ export function StaffHeader({
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-indigo-700">Отклик · {role}</p>
-            <h1 className="truncate text-base font-semibold text-slate-950">{title}</h1>
+            <div className="flex items-center gap-2">
+              <OtklikLogo compact size={34} />
+              <div className="min-w-0"><p className="text-xs font-semibold text-indigo-700">{role}</p><h1 className="truncate text-base font-semibold text-slate-950">{title}</h1></div>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {navigation.length ? (

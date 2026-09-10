@@ -124,6 +124,8 @@
   body {
     @apply bg-background text-foreground antialiased;
     min-width: 320px;
+    font-size: 1rem;
+    line-height: 1.6;
     overflow-wrap: anywhere;
   }
   html {
@@ -164,10 +166,10 @@
     @apply rounded-2xl border border-slate-200/90 bg-white shadow-[0_12px_32px_-24px_rgba(30,41,59,0.28)];
   }
   .staff-workspace {
-    @apply min-h-screen overflow-x-hidden bg-[#f5f6fa] text-slate-950 lg:pl-60;
+    @apply min-h-screen overflow-x-hidden bg-[#f5f6fa] text-slate-950 lg:pl-62;
   }
   .staff-card {
-    @apply rounded-2xl border border-slate-200/90 bg-white shadow-[0_8px_24px_-20px_rgba(30,41,59,0.28)];
+    @apply rounded-2xl border border-slate-200/90 bg-white text-[15px] leading-6 shadow-[0_8px_24px_-20px_rgba(30,41,59,0.28)];
   }
   .page-eyebrow {
     @apply text-xs font-semibold tracking-[0.14em] text-indigo-700 uppercase;

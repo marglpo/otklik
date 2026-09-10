@@ -1,14 +1,15 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
 
+import { OtklikLogo } from "@/components/brand/otklik-logo"
+
 export function PublicShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#f7f8fb] text-slate-950">
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-5 py-4">
-          <Link href="/" aria-label="Отклик — на главную" className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-950">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-indigo-600 text-base text-white shadow-sm">О</span>
-            <span>Отклик</span>
+          <Link href="/" aria-label="Отклик — на главную" className="rounded-xl">
+            <OtklikLogo size={38} />
           </Link>
           <nav aria-label="Основная навигация" className="flex items-center gap-1 sm:gap-2">
             <Link href="/appeal/new" className="hidden rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-800 sm:block">Обратиться</Link>

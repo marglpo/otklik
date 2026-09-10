@@ -5,9 +5,9 @@ import { PublicShell } from "@/components/appeals/public-shell"
 export default function Home() {
   return (
     <PublicShell>
-      <section className="grid items-center gap-10 py-10 md:grid-cols-[1.15fr_.85fr] md:py-20">
-        <div className="space-y-6">
-          <p className="text-sm font-semibold tracking-[0.18em] text-indigo-700 uppercase">
+      <section className="grid items-center gap-12 py-12 md:grid-cols-[1.15fr_.85fr] md:py-24">
+        <div className="space-y-7">
+          <p className="page-eyebrow">
             Анонимное доверенное обращение
           </p>
           <h1 className="max-w-2xl text-4xl leading-[1.1] font-semibold tracking-[-0.035em] text-slate-950 sm:text-5xl">
@@ -38,14 +38,14 @@ export default function Home() {
             ["2", "Сохраните номер", "Мы не храним его в открытом виде и не сможем восстановить."],
             ["3", "Проверяйте статус", "Введите номер позже — аккаунт не нужен."],
           ].map(([number, title, text]) => (
-            <article key={number} className="surface-card p-5">
+            <article key={number} className="surface-card p-6">
               <div className="flex gap-4">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 font-semibold text-indigo-800">
                   {number}
                 </span>
                 <div>
-                  <h2 className="font-semibold">{title}</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{text}</p>
+                  <h2 className="text-lg font-semibold">{title}</h2>
+                  <p className="mt-1 text-[15px] leading-6 text-slate-600">{text}</p>
                 </div>
               </div>
             </article>

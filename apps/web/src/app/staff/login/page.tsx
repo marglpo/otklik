@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 
+import { OtklikLogo } from "@/components/brand/otklik-logo"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -48,7 +49,7 @@ export default function StaffLoginPage() {
     <main className="grid min-h-screen place-items-center bg-[#f5f6fa] p-4">
       <Card className="w-full max-w-md border-slate-200 shadow-[0_20px_50px_-35px_rgba(30,41,59,.35)]">
         <CardHeader>
-          <div className="mb-3 flex size-11 items-center justify-center rounded-xl bg-indigo-600 font-semibold text-white shadow-sm">О</div>
+          <OtklikLogo className="mb-4" size={42} />
           <CardTitle className="text-2xl">Вход для сотрудников</CardTitle>
           <CardDescription>Защищённое рабочее пространство Отклика.</CardDescription>
         </CardHeader>

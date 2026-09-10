@@ -34,12 +34,12 @@ export default function CheckAppealPage() {
     <PublicShell>
       <form
         onSubmit={submit}
-        className="surface-card mx-auto mt-10 max-w-lg space-y-6 p-6 sm:mt-16 sm:p-9"
+        className="surface-card mx-auto mt-10 max-w-xl space-y-7 p-6 sm:mt-20 sm:p-10"
       >
         <div>
-          <p className="text-xs font-semibold tracking-[0.14em] text-indigo-700 uppercase">Безопасный доступ</p>
-          <h1 className="mt-2 text-3xl font-semibold">Введите сохранённый номер</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
+          <p className="page-eyebrow">Безопасный доступ</p>
+          <h1 className="mt-2 text-3xl font-semibold sm:text-[32px]">Введите сохранённый номер</h1>
+          <p className="mt-2 text-base leading-7 text-slate-600">
             Номер используется только для этой проверки и не появится в адресе страницы.
           </p>
         </div>
