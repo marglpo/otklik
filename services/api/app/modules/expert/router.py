@@ -147,9 +147,7 @@ async def request_transfer(
     )
 
 
-@router.post(
-    "/appeals/{appeal_id}/cannot-take", response_model=ActionResponse, status_code=201
-)
+@router.post("/appeals/{appeal_id}/cannot-take", response_model=ActionResponse, status_code=201)
 async def cannot_take_appeal(
     appeal_id: UUID,
     payload: CannotTakeRequest,
@@ -207,24 +205,18 @@ async def expert_attachment(
 async def acquire_composer_lock(
     appeal_id: UUID, expert: Expert, service: Service
 ) -> ComposerLockResponse:
-    return await service.acquire_composer_lock(
-        appeal_id, expert.id, expert_role=expert.role
-    )
+    return await service.acquire_composer_lock(appeal_id, expert.id, expert_role=expert.role)
 
 
 @router.post("/appeals/{appeal_id}/composer-lock/heartbeat", response_model=ComposerLockResponse)
 async def heartbeat_composer_lock(
     appeal_id: UUID, expert: Expert, service: Service
 ) -> ComposerLockResponse:
-    return await service.heartbeat_composer_lock(
-        appeal_id, expert.id, expert_role=expert.role
-    )
+    return await service.heartbeat_composer_lock(appeal_id, expert.id, expert_role=expert.role)
 
 
 @router.delete("/appeals/{appeal_id}/composer-lock", response_model=ActionResponse)
 async def release_composer_lock(
     appeal_id: UUID, expert: Expert, service: Service
 ) -> ActionResponse:
-    return await service.release_composer_lock(
-        appeal_id, expert.id, expert_role=expert.role
-    )
+    return await service.release_composer_lock(appeal_id, expert.id, expert_role=expert.role)

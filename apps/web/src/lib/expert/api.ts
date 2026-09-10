@@ -29,7 +29,7 @@ export type ExpertMessage = {
 
 export type ExpertDetail = ExpertQueueItem & {
   description: string | null
-  intake_answers: Record<string, string>
+  intake_answers: Record<string, string | boolean | string[]>
   attachments: Array<{ id: string; mime_type: string; byte_size: number; created_at: string }>
   messages: ExpertMessage[]
   internal_notes: Array<{

@@ -88,7 +88,8 @@ Phase 4 crisis detection loads active literal phrases from `crisis_rules`. Rules
 administrator-managed metadata, never applicant content, and cannot contain executable regex.
 Normalization handles Unicode compatibility, case, `ё`/`е`, punctuation, hyphens, and repeated
 whitespace. Compact matching is an explicit per-rule choice. Matching retains only the appeal's
-boolean crisis flag, never the matched phrase. Phase 6 will add administrator CRUD.
+boolean crisis flag, never the matched phrase. Phase 6A adds exact-role administrator CRUD
+and a transient tester that does not persist or audit tested text.
 
 Operator serializers explicitly enumerate triage fields and omit chat and internal notes.
 Administrator role alone does not grant this access. Applicant-visible rejection explanations
@@ -110,6 +111,32 @@ Audit records may contain allowlisted operational metadata only. Audit `reason` 
 `metadata_json` must never contain appeal or chat text, internal notes, crisis contacts,
 passwords, access tokens, raw track numbers, or encryption keys. The polymorphic `entity_id`
 has no foreign key by design.
+
+## Administration and metadata analytics
+
+The administrator configuration and C7/C8 APIs preserve a strict metadata boundary. Admins
+may manage staff/configuration, view workflow identifiers, statuses, priorities, safe assigned
+staff metadata, timestamps, aggregate counts, and allowlisted audit events. Those code paths do
+not query or decrypt appeal contents, intake values, messages, notes, attachments, crisis
+contacts, return explanations, feedback comments, or complaints. Administrator role still does
+not satisfy operator/expert content policies.
+
+Stuck-appeal intervention is limited to active workflow states and requires a short operational
+reason. Assignment validates active expert role, configured routing eligibility, and capacity;
+the transaction writes participant, assignment/status history, and a safe audit event. Terminal
+closure/rejection is intentionally unavailable through this recovery control. Operational
+reasons must not quote applicant content.
+
+CSV export selects an explicit metadata allowlist from `appeals` and category configuration.
+It includes UUID, created timestamp, configured applicant type/category, status, priority,
+crisis boolean, timing intervals, and return count. It does not join encrypted tables or expose
+track digests. Analytics uses PostgreSQL counts/averages/grouping over the same metadata and
+workflow timestamps. Missing metrics are returned as null/empty, never inferred.
+
+Staff invitation/reset tokens use cryptographically secure randomness and are persisted only
+as a one-way digest. SMTP credentials remain environment-only. Public applicant types,
+questions, and crisis resources are administrator-defined configuration; submitted answers and
+optional applicant contact retain their existing encrypted/isolated storage.
 
 ## Network and operational limits
 

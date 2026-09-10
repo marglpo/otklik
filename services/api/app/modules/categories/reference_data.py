@@ -50,9 +50,7 @@ STARTER_CATEGORIES = (
 
 INTAKE_QUESTIONS = (
     IntakeQuestionDefinition("where", "Где это происходит?", "Где это происходит?"),
-    IntakeQuestionDefinition(
-        "duration", "Как давно это происходит?", "Как давно это происходит?"
-    ),
+    IntakeQuestionDefinition("duration", "Как давно это происходит?", "Как давно это происходит?"),
     IntakeQuestionDefinition("involved", "Кто участвует?", "Кто участвует?"),
     IntakeQuestionDefinition(
         "help_requested",
@@ -62,3 +60,19 @@ INTAKE_QUESTIONS = (
 )
 
 INTAKE_QUESTION_IDS = frozenset(question.id for question in INTAKE_QUESTIONS)
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicantTypeDefinition:
+    code: str
+    label: str
+    description: str
+    tone: str
+    sort_order: int
+
+
+APPLICANT_TYPES = (
+    ApplicantTypeDefinition("student", "Ученик", "Обращение от ученика", "informal", 10),
+    ApplicantTypeDefinition("parent", "Родитель", "Обращение от родителя", "formal", 20),
+    ApplicantTypeDefinition("teacher", "Учитель", "Обращение от учителя", "formal", 30),
+)

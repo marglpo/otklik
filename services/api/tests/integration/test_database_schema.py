@@ -28,7 +28,7 @@ from app.db.models import (
 )
 
 API_ROOT = Path(__file__).resolve().parents[2]
-CURRENT_REVISION = "20260909_0005"
+CURRENT_REVISION = "20260910_0006"
 
 
 def _run_upgrade(connection: Connection) -> None:
@@ -41,9 +41,7 @@ def _run_upgrade(connection: Connection) -> None:
 def migrated_database_engine() -> Iterator[Engine]:
     async_url = make_url(Settings().database_url)
     sync_url = async_url.set(drivername="postgresql+psycopg")
-    engine = create_engine(
-        sync_url, poolclass=NullPool, connect_args={"connect_timeout": 3}
-    )
+    engine = create_engine(sync_url, poolclass=NullPool, connect_args={"connect_timeout": 3})
     with engine.connect() as connection:
         _run_upgrade(connection)
     yield engine
@@ -175,9 +173,7 @@ def test_rating_and_message_author_checks_are_enforced(
             staff_id = _insert_staff(connection)
             _expect_integrity_error(
                 connection,
-                AppealFeedback.__table__.insert().values(
-                    id=uuid4(), appeal_id=appeal_id, rating=6
-                ),
+                AppealFeedback.__table__.insert().values(id=uuid4(), appeal_id=appeal_id, rating=6),
             )
             _expect_integrity_error(
                 connection,
@@ -300,6 +296,49 @@ def test_phase5_encrypted_reason_and_return_constraints(
                     requested_by_staff_user_id=requester_id,
                     encrypted_reason=b"ciphertext",
                     key_version=None,
+                ),
+            )
+        finally:
+            transaction.rollback()
+
+
+def test_transfer_resolution_consistency_constraint_is_enforced_unchanged(
+    migrated_database_engine: Engine,
+) -> None:
+    constraint_name = "ck_transfer_requests_transfer_requests_resolution_consistency"
+    with migrated_database_engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            definition = connection.scalar(
+                text(
+                    "SELECT pg_get_constraintdef(oid) "
+                    "FROM pg_constraint WHERE conname = :constraint_name"
+                ),
+                {"constraint_name": constraint_name},
+            )
+            assert definition is not None
+            normalized_definition = " ".join(str(definition).lower().split())
+            assert "'pending'" in normalized_definition
+            assert "resolved_at is null" in normalized_definition
+            assert "resolved_by_staff_user_id is null" in normalized_definition
+            assert "'approved'" in normalized_definition
+            assert "'rejected'" in normalized_definition
+            assert "resolved_at is not null" in normalized_definition
+
+            appeal_id = _insert_appeal(connection, digest=b"6" * 32)
+            requester_id = _insert_staff(connection)
+            resolver_id = _insert_staff(connection)
+            _expect_integrity_error(
+                connection,
+                TransferRequest.__table__.insert().values(
+                    id=uuid4(),
+                    appeal_id=appeal_id,
+                    requested_by_staff_user_id=requester_id,
+                    encrypted_reason=b"ciphertext",
+                    key_version=1,
+                    status="pending",
+                    resolved_by_staff_user_id=resolver_id,
+                    resolved_at=text("CURRENT_TIMESTAMP"),
                 ),
             )
         finally:

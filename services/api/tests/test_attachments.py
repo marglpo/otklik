@@ -58,13 +58,9 @@ def _appeal() -> Appeal:
     )
 
 
-def _image_bytes(
-    image_format: str = "PNG", *, exif: Image.Exif | None = None
-) -> bytes:
+def _image_bytes(image_format: str = "PNG", *, exif: Image.Exif | None = None) -> bytes:
     output = BytesIO()
-    Image.new("RGB", (16, 12), (42, 110, 170)).save(
-        output, format=image_format, exif=exif
-    )
+    Image.new("RGB", (16, 12), (42, 110, 170)).save(output, format=image_format, exif=exif)
     return output.getvalue()
 
 
@@ -74,9 +70,7 @@ async def test_valid_image_is_sanitized_encrypted_and_stored_privately(
     appeal = _appeal()
     repository = FakeAttachmentRepository(appeal)
     storage = PrivateAttachmentStorage(tmp_path / "private")
-    service = AttachmentService(
-        cast(PublicAppealRepository, repository), test_settings, storage
-    )
+    service = AttachmentService(cast(PublicAppealRepository, repository), test_settings, storage)
 
     result = await service.store_image(
         appeal_id=appeal.id,
@@ -87,9 +81,7 @@ async def test_valid_image_is_sanitized_encrypted_and_stored_privately(
     assert metadata is not None
     stored = (tmp_path / "private" / metadata.storage_key).read_bytes()
     crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
-    sanitized = crypto.decrypt_bytes(
-        stored, aad=attachment_aad(appeal.id, metadata.id)
-    )
+    sanitized = crypto.decrypt_bytes(stored, aad=attachment_aad(appeal.id, metadata.id))
 
     assert result.mime_type == "image/png"
     assert result.byte_size == len(stored) == metadata.byte_size

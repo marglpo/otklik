@@ -43,9 +43,7 @@ class StaffManagementService:
         try:
             await self._repository.add_staff_user(staff)
             if role is StaffRole.EXPERT:
-                await self._repository.add_expert_profile(
-                    ExpertProfile(staff_user_id=staff.id)
-                )
+                await self._repository.add_expert_profile(ExpertProfile(staff_user_id=staff.id))
             await self._repository.commit()
         except IntegrityError as exc:
             await self._repository.rollback()
@@ -56,9 +54,7 @@ class StaffManagementService:
         staff = await self._get_staff(staff_user_id)
         staff.is_active = is_active
         if not is_active:
-            await self._repository.revoke_all_sessions(
-                staff.id, revoked_at=datetime.now(UTC)
-            )
+            await self._repository.revoke_all_sessions(staff.id, revoked_at=datetime.now(UTC))
         await self._repository.commit()
         return staff
 
@@ -67,9 +63,7 @@ class StaffManagementService:
             raise ValidationError("A new password is required.")
         staff = await self._get_staff(staff_user_id)
         staff.password_hash = hash_password(new_password)
-        await self._repository.revoke_all_sessions(
-            staff.id, revoked_at=datetime.now(UTC)
-        )
+        await self._repository.revoke_all_sessions(staff.id, revoked_at=datetime.now(UTC))
         await self._repository.commit()
 
     async def _get_staff(self, staff_user_id: UUID) -> StaffUser:

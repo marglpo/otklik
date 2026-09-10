@@ -70,9 +70,7 @@ class FakeRepository:
     async def get_session_by_id(self, session_id: UUID) -> StaffSession | None:
         return self.sessions.get(session_id)
 
-    async def get_session_by_refresh_digest_for_update(
-        self, digest: bytes
-    ) -> StaffSession | None:
+    async def get_session_by_refresh_digest_for_update(self, digest: bytes) -> StaffSession | None:
         return next(
             (
                 session
@@ -389,9 +387,7 @@ async def test_rotated_refresh_token_cannot_be_reused(test_settings: Settings) -
 
 
 @pytest.mark.parametrize("session_state", ["expired", "revoked"])
-async def test_invalid_refresh_session_fails(
-    test_settings: Settings, session_state: str
-) -> None:
+async def test_invalid_refresh_session_fails(test_settings: Settings, session_state: str) -> None:
     staff = _staff()
     service, repository = _service(test_settings, staff)
     original = await _login(service, staff)
@@ -561,9 +557,7 @@ async def test_role_guard_requires_authentication(test_settings: Settings) -> No
 
     @app.get("/test-auth-required")
     async def protected(
-        _staff_user: Annotated[
-            StaffUser, Depends(require_role(StaffRole.OPERATOR))
-        ],
+        _staff_user: Annotated[StaffUser, Depends(require_role(StaffRole.OPERATOR))],
     ) -> dict[str, bool]:
         return {"ok": True}
 
@@ -697,9 +691,7 @@ async def test_multiple_demo_expert_routing_seed_is_idempotent(
         }
     )
     staff_repository = FakeRepository()
-    await _seed_definitions(
-        cast(StaffAuthRepository, staff_repository), _definitions(settings)
-    )
+    await _seed_definitions(cast(StaffAuthRepository, staff_repository), _definitions(settings))
     routing_repository = FakeDemoRoutingRepository(list(staff_repository.users.values()))
     managed_group = SpecialistGroup(
         id=uuid4(),
@@ -731,9 +723,7 @@ async def test_multiple_demo_expert_routing_seed_is_idempotent(
     assert routing_repository.groups["psychologists"].name == "Administrator-managed name"
     experts = [user for user in staff_repository.users.values() if user.role is StaffRole.EXPERT]
     assert len(routing_repository.memberships) == len(experts) == 5
-    psychologist = next(
-        user for user in experts if user.login == settings.demo_psychologist_login
-    )
+    psychologist = next(user for user in experts if user.login == settings.demo_psychologist_login)
     psychologist_group = routing_repository.groups["psychologists"]
     assert (psychologist.id, psychologist_group.id) in routing_repository.memberships
     bullying = next(
@@ -742,9 +732,7 @@ async def test_multiple_demo_expert_routing_seed_is_idempotent(
         if category.slug == "bullying-insults"
     )
     eligible_group_ids = {
-        group_id
-        for category_id, group_id in routing_repository.rules
-        if category_id == bullying.id
+        group_id for category_id, group_id in routing_repository.rules if category_id == bullying.id
     }
     assert len(eligible_group_ids) >= 3
 

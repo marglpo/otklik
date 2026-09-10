@@ -4,8 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
-from app.db.models.enums import AppealStatus, ApplicantType, MessageAuthorType
-from app.modules.categories.reference_data import INTAKE_QUESTION_IDS
+from app.db.models.enums import AppealStatus, ApplicantTone, IntakeFieldType, MessageAuthorType
 
 
 class CategoryPublic(BaseModel):
@@ -22,6 +21,20 @@ class IntakeQuestionPublic(BaseModel):
     prompt_formal: str
     max_length: int
     optional: bool = True
+    label: str
+    help_text: str | None
+    field_type: IntakeFieldType
+    options: list[str]
+    required: bool
+    category_ids: list[UUID]
+    required_category_ids: list[UUID]
+
+
+class ApplicantTypePublic(BaseModel):
+    code: str
+    label: str
+    description: str | None
+    tone: ApplicantTone
 
 
 class CrisisSupportResourcePublic(BaseModel):
@@ -33,28 +46,36 @@ class CrisisSupportResourcePublic(BaseModel):
 
 
 class PublicReferenceResponse(BaseModel):
+    applicant_types: list[ApplicantTypePublic]
     categories: list[CategoryPublic]
     intake_questions: list[IntakeQuestionPublic]
     crisis_support_resources: list[CrisisSupportResourcePublic]
 
 
 class AppealCreateRequest(BaseModel):
-    applicant_type: ApplicantType
+    applicant_type: str = Field(min_length=2, max_length=50, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     category_id: UUID | None = None
     description: SecretStr | None = Field(default=None, max_length=5000)
-    intake_answers: dict[str, SecretStr] | None = Field(default=None, max_length=4)
+    intake_answers: dict[str, SecretStr | bool | list[SecretStr]] | None = Field(
+        default=None, max_length=100
+    )
 
     @field_validator("intake_answers")
     @classmethod
     def validate_intake_answers(
-        cls, value: dict[str, SecretStr] | None
-    ) -> dict[str, SecretStr] | None:
+        cls, value: dict[str, SecretStr | bool | list[SecretStr]] | None
+    ) -> dict[str, SecretStr | bool | list[SecretStr]] | None:
         if value is None:
             return None
-        if not set(value).issubset(INTAKE_QUESTION_IDS):
-            raise ValueError("Unknown intake question")
-        if any(len(answer.get_secret_value()) > 1000 for answer in value.values()):
-            raise ValueError("Intake answers must not exceed 1000 characters")
+        for answer in value.values():
+            values = answer if isinstance(answer, list) else [answer]
+            if len(values) > 30:
+                raise ValueError("Too many selected answers")
+            if any(
+                isinstance(item, SecretStr) and len(item.get_secret_value()) > 2000
+                for item in values
+            ):
+                raise ValueError("Intake answers must not exceed 2000 characters")
         return value
 
     @model_validator(mode="after")
@@ -89,7 +110,7 @@ class AppealAccessResponse(BaseModel):
 
 
 class CurrentAppealResponse(BaseModel):
-    applicant_type: ApplicantType
+    applicant_type: str
     category: CategoryPublic | None
     status: AppealStatus
     status_text: str

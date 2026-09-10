@@ -130,9 +130,7 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_category_group_rules")),
-        sa.UniqueConstraint(
-            "category_id", "specialist_group_id", name="category_group_rules_pair"
-        ),
+        sa.UniqueConstraint("category_id", "specialist_group_id", name="category_group_rules_pair"),
     )
 
     op.create_table(
@@ -149,9 +147,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["specialist_group_id"],
             ["specialist_groups.id"],
-            name=op.f(
-                "fk_expert_group_memberships_specialist_group_id_specialist_groups"
-            ),
+            name=op.f("fk_expert_group_memberships_specialist_group_id_specialist_groups"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_expert_group_memberships")),
@@ -641,9 +637,7 @@ def upgrade() -> None:
         ["appeal_id", "created_at"],
         unique=False,
     )
-    op.create_index(
-        "uq_attachments_storage_key", "attachments", ["storage_key"], unique=True
-    )
+    op.create_index("uq_attachments_storage_key", "attachments", ["storage_key"], unique=True)
 
     op.create_table(
         "audit_log",

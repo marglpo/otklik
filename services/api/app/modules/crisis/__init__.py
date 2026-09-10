@@ -1,2 +1,1 @@
 """Crisis workflow module placeholder."""
-

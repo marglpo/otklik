@@ -312,9 +312,7 @@ class ExpertService:
         """Ask an operator to choose a replacement without abandoning responsibility."""
 
         appeal = await self._locked_primary_appeal(appeal_id, expert_id, expert_role)
-        return await self._create_transfer_request(
-            appeal, expert_id, reason, target_expert_id=None
-        )
+        return await self._create_transfer_request(appeal, expert_id, reason, target_expert_id=None)
 
     async def _create_transfer_request(
         self,
@@ -520,18 +518,23 @@ class ExpertService:
             updated_at=appeal.updated_at,
         )
 
-    def _decrypt_intake(self, record: ExpertDetailRecord) -> dict[str, str]:
+    def _decrypt_intake(
+        self, record: ExpertDetailRecord
+    ) -> dict[str, str | bool | list[str]]:
         if record.intake is None:
             return {}
         value = self._crypto.decrypt_json(
             record.intake.encrypted_payload,
             aad=intake_answers_aad(record.appeal.id),
         )
-        return (
-            {str(key): str(item) for key, item in value.items()}
-            if isinstance(value, dict)
-            else {}
-        )
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(key): item
+            for key, item in value.items()
+            if isinstance(item, (str, bool))
+            or (isinstance(item, list) and all(isinstance(choice, str) for choice in item))
+        }
 
     def _message_response(self, message: AppealMessage, author) -> ExpertMessage:
         return ExpertMessage(
@@ -582,18 +585,14 @@ class ExpertService:
             key_version=self._crypto.key_version,
         )
 
-    async def _authorized_appeal(
-        self, appeal_id: UUID, expert_id: UUID, expert_role: StaffRole
-    ):
+    async def _authorized_appeal(self, appeal_id: UUID, expert_id: UUID, expert_role: StaffRole):
         self._require_expert(expert_role)
         appeal = await self._repository.get_appeal_for_participant(appeal_id, expert_id)
         if appeal is None:
             raise ForbiddenError("This appeal is not assigned or shared with you.")
         return appeal
 
-    async def _locked_appeal(
-        self, appeal_id: UUID, expert_id: UUID, expert_role: StaffRole
-    ):
+    async def _locked_appeal(self, appeal_id: UUID, expert_id: UUID, expert_role: StaffRole):
         self._require_expert(expert_role)
         appeal = await self._repository.get_appeal_for_participant(
             appeal_id, expert_id, for_update=True

@@ -59,4 +59,3 @@ async def test_readiness_returns_503_when_a_service_fails(test_settings: Setting
         "status": "unavailable",
         "services": {"application": "ok", "database": "unavailable", "valkey": "ok"},
     }
-

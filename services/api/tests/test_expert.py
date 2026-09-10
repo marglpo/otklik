@@ -202,9 +202,12 @@ async def test_expert_message_is_encrypted_and_first_response_is_set_once(test_s
     crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
     assert len(messages) == 2
     assert "Публичный ответ".encode() not in messages[0].encrypted_body
-    assert crypto.decrypt_text(
-        messages[0].encrypted_body, aad=appeal_message_aad(appeal.id, messages[0].id)
-    ) == "Публичный ответ"
+    assert (
+        crypto.decrypt_text(
+            messages[0].encrypted_body, aad=appeal_message_aad(appeal.id, messages[0].id)
+        )
+        == "Публичный ответ"
+    )
     assert messages[0].author_type is MessageAuthorType.SPECIALIST
     assert messages[0].author_staff_user_id == expert_id
     assert appeal.first_specialist_response_at == first_time
@@ -258,9 +261,10 @@ async def test_internal_note_is_encrypted_and_separate_from_chat(test_settings) 
     notes = [item for item in repository.added if isinstance(item, InternalNote)]
     assert not [item for item in repository.added if isinstance(item, AppealMessage)]
     crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
-    assert crypto.decrypt_text(
-        notes[0].encrypted_body, aad=internal_note_aad(appeal.id, notes[0].id)
-    ) == "Только для команды"
+    assert (
+        crypto.decrypt_text(notes[0].encrypted_body, aad=internal_note_aad(appeal.id, notes[0].id))
+        == "Только для команды"
+    )
 
 
 async def test_take_clarify_and_answer_ready_transitions(test_settings) -> None:
@@ -346,9 +350,7 @@ async def test_primary_adds_eligible_coexecutor_and_keeps_primary(test_settings)
             reason="Eligible and available",
         )
     )
-    service, repository, _locks = _service(
-        test_settings, appeal, primary_id, routing
-    )
+    service, repository, _locks = _service(test_settings, appeal, primary_id, routing)
     repository.primary = AppealParticipant(
         id=uuid4(),
         appeal_id=appeal.id,
@@ -366,11 +368,7 @@ async def test_primary_adds_eligible_coexecutor_and_keeps_primary(test_settings)
         expert_role=StaffRole.EXPERT,
     )
 
-    participant = next(
-        item
-        for item in repository.added
-        if isinstance(item, AppealParticipant)
-    )
+    participant = next(item for item in repository.added if isinstance(item, AppealParticipant))
     assert repository.primary.participant_role is AppealParticipantRole.PRIMARY
     assert participant.staff_user_id == target.id
     assert participant.participant_role is AppealParticipantRole.COEXECUTOR
@@ -398,9 +396,7 @@ async def test_transfer_request_reason_is_encrypted(test_settings) -> None:
             reason="Eligible and available",
         )
     )
-    service, repository, _locks = _service(
-        test_settings, appeal, primary_id, routing
-    )
+    service, repository, _locks = _service(test_settings, appeal, primary_id, routing)
     repository.primary = AppealParticipant(
         id=uuid4(),
         appeal_id=appeal.id,
@@ -420,10 +416,13 @@ async def test_transfer_request_reason_is_encrypted(test_settings) -> None:
 
     transfer = next(item for item in repository.added if isinstance(item, TransferRequest))
     crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
-    assert crypto.decrypt_text(
-        transfer.encrypted_reason,
-        aad=transfer_reason_aad(appeal.id, transfer.id),
-    ) == "Требуется другой профиль"
+    assert (
+        crypto.decrypt_text(
+            transfer.encrypted_reason,
+            aad=transfer_reason_aad(appeal.id, transfer.id),
+        )
+        == "Требуется другой профиль"
+    )
 
 
 async def test_cannot_take_requires_reason_and_keeps_current_assignment(test_settings) -> None:
@@ -455,10 +454,13 @@ async def test_cannot_take_requires_reason_and_keeps_current_assignment(test_set
     assert transfer.requested_target_staff_user_id is None
     assert transfer.status is TransferRequestStatus.PENDING
     assert "Нет нужной специализации".encode() not in transfer.encrypted_reason
-    assert crypto.decrypt_text(
-        transfer.encrypted_reason,
-        aad=transfer_reason_aad(appeal.id, transfer.id),
-    ) == "Нет нужной специализации"
+    assert (
+        crypto.decrypt_text(
+            transfer.encrypted_reason,
+            aad=transfer_reason_aad(appeal.id, transfer.id),
+        )
+        == "Нет нужной специализации"
+    )
     assert appeal.assigned_expert_id == primary_id
     assert repository.primary.is_active is True
     assert appeal.status is AppealStatus.ASSIGNED
@@ -474,9 +476,7 @@ async def test_expert_attachment_requires_participation_and_decrypts(
     attachment_id = uuid4()
     crypto = ContentCrypto(settings.content_encryption_key.get_secret_value())
     plaintext = b"sanitized-image"
-    encrypted = crypto.encrypt_bytes(
-        plaintext, aad=attachment_aad(appeal.id, attachment_id)
-    )
+    encrypted = crypto.encrypt_bytes(plaintext, aad=attachment_aad(appeal.id, attachment_id))
     storage_key = PrivateAttachmentStorage(tmp_path).write(encrypted)
     attachment = Attachment(
         id=attachment_id,

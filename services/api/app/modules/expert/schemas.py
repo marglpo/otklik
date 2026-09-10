@@ -7,7 +7,6 @@ from app.db.models.enums import (
     AppealParticipantRole,
     AppealPriority,
     AppealStatus,
-    ApplicantType,
     MessageAuthorType,
     TransferRequestStatus,
 )
@@ -16,7 +15,7 @@ from app.modules.operator.schemas import AttachmentDescriptor, OperatorCategory,
 
 class ExpertQueueItem(BaseModel):
     id: UUID
-    applicant_type: ApplicantType
+    applicant_type: str
     category: OperatorCategory | None
     status: AppealStatus
     priority: AppealPriority
@@ -65,13 +64,13 @@ class ExpertTransferState(BaseModel):
 
 class ExpertAppealDetail(BaseModel):
     id: UUID
-    applicant_type: ApplicantType
+    applicant_type: str
     category: OperatorCategory | None
     status: AppealStatus
     priority: AppealPriority
     crisis_flag: bool
     description: str | None
-    intake_answers: dict[str, str]
+    intake_answers: dict[str, str | bool | list[str]]
     attachments: list[AttachmentDescriptor]
     messages: list[ExpertMessage]
     internal_notes: list[ExpertNote]

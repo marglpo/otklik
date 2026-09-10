@@ -39,9 +39,7 @@ class SpecialistGroup(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "specialist_groups"
     __table_args__ = (
         UniqueConstraint("slug", name="specialist_groups_slug"),
-        CheckConstraint(
-            "slug = lower(btrim(slug))", name="specialist_groups_slug_normalized"
-        ),
+        CheckConstraint("slug = lower(btrim(slug))", name="specialist_groups_slug_normalized"),
     )
 
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -55,9 +53,7 @@ class SpecialistGroup(UUIDPrimaryKeyMixin, Base):
 class CategoryGroupRule(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "category_group_rules"
     __table_args__ = (
-        UniqueConstraint(
-            "category_id", "specialist_group_id", name="category_group_rules_pair"
-        ),
+        UniqueConstraint("category_id", "specialist_group_id", name="category_group_rules_pair"),
     )
 
     category_id: Mapped[UUID] = mapped_column(

@@ -305,10 +305,7 @@ class OperatorRepository:
                 .order_by(TransferRequest.created_at, TransferRequest.id)
             )
         ).all()
-        return [
-            OperatorTransferRecord(row[0], row[1], row[2], row[3])
-            for row in rows
-        ]
+        return [OperatorTransferRecord(row[0], row[1], row[2], row[3]) for row in rows]
 
     async def get_transfer_for_update(self, transfer_id: UUID) -> TransferRequest | None:
         return await self._session.scalar(

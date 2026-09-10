@@ -77,9 +77,7 @@ def test_hmac_is_deterministic() -> None:
 
 
 def test_different_hmac_secrets_produce_different_digests() -> None:
-    assert hmac_sha256("secret-one", "transient") != hmac_sha256(
-        "secret-two", "transient"
-    )
+    assert hmac_sha256("secret-one", "transient") != hmac_sha256("secret-two", "transient")
 
 
 def test_rate_limit_digest_is_deterministic() -> None:

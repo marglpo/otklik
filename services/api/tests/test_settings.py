@@ -26,10 +26,7 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert settings.jwt_secret is not None
     assert settings.jwt_secret.get_secret_value() == "test-jwt-value"
     assert settings.applicant_access_jwt_secret is not None
-    assert (
-        settings.applicant_access_jwt_secret.get_secret_value()
-        == "test-applicant-access-value"
-    )
+    assert settings.applicant_access_jwt_secret.get_secret_value() == "test-applicant-access-value"
     assert settings.cors_origins == ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
@@ -51,6 +48,20 @@ def test_production_rejects_wildcard_cors() -> None:
             applicant_access_jwt_secret="a" * 32,
             content_encryption_key=encryption_key,
             cors_origins=["*"],
+        )
+
+
+def test_production_rejects_compose_demo_secrets() -> None:
+    with pytest.raises(ValueError, match="forbids built-in demo secrets"):
+        Settings(
+            _env_file=None,
+            app_env=AppEnvironment.PRODUCTION,
+            jwt_secret="demo-only-jwt-secret-change-before-prod-2026",
+            track_hmac_secret="demo-only-track-hmac-change-before-prod-2026",
+            rate_limit_hmac_secret="demo-only-rate-hmac-change-before-prod-2026",
+            refresh_token_hmac_secret="demo-only-refresh-hmac-change-before-prod-2026",
+            applicant_access_jwt_secret="demo-only-applicant-jwt-change-before-prod-2026",
+            content_encryption_key="b3RrbGlrLWRlbW8tY29udGVudC1rZXktMzItYnl0ZSE=",
         )
 
 

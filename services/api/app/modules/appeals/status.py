@@ -1,4 +1,4 @@
-from app.db.models.enums import AppealStatus, ApplicantType
+from app.db.models.enums import AppealStatus, ApplicantTone, ApplicantType
 
 _STATUS_TEXT: dict[AppealStatus, tuple[str, str]] = {
     AppealStatus.NEW: (
@@ -40,6 +40,11 @@ _STATUS_TEXT: dict[AppealStatus, tuple[str, str]] = {
 }
 
 
-def applicant_status_text(status: AppealStatus, applicant_type: ApplicantType) -> str:
+def applicant_status_text(
+    status: AppealStatus,
+    applicant_type: str,
+    tone: ApplicantTone | None = None,
+) -> str:
     student_text, formal_text = _STATUS_TEXT[status]
-    return student_text if applicant_type is ApplicantType.STUDENT else formal_text
+    informal = tone is ApplicantTone.INFORMAL or applicant_type == ApplicantType.STUDENT
+    return student_text if informal else formal_text

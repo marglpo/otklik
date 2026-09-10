@@ -23,4 +23,3 @@ def downgrade() -> None:
     # The extension may have existed before Otklik and can be shared by future columns.
     # Do not remove database-level infrastructure on application downgrade.
     pass
-

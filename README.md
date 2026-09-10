@@ -1,10 +1,47 @@
 # Otklik
 
 Otklik is a privacy-first anonymous case-management platform for trusted appeals. The
-repository is currently at **Phase 5: expert collaboration and resolution**. Anonymous
+repository is currently at the **hackathon MVP through administration (C7) and metadata-only
+analytics (C8)**. Anonymous
 creation and status access, staff authentication, operator triage, persistent crisis rules,
 expert/applicant dialogue, collaboration, and encrypted image handling are implemented. The
-full administration UI, analytics, and machine learning are not.
+configuration workspace, audit viewer, metadata analytics, and privacy-safe CSV export are
+implemented. Machine learning and final visual redesign are not.
+
+## Quick start
+
+Requirements: Docker Desktop, or Docker Engine with Docker Compose. A fresh evaluator machine
+does not need Python, Node.js, PostgreSQL, or Valkey installed locally.
+
+```text
+git clone <repository-url>
+cd otklik
+docker compose up --build
+```
+
+Open the applicant site at `http://localhost:3000` and staff login at
+`http://localhost:3000/staff/login`.
+
+| Demo role | Login | Password |
+| --- | --- | --- |
+| Administrator | `demo_admin` | `AdminDemo_2026!` |
+| Operator | `demo_operator` | `OperatorDemo_2026!` |
+| General expert | `demo_expert` | `ExpertDemo_2026!` |
+| Psychologist | `demo_psychologist` | `ExpertDemo_2026!` |
+| Lawyer | `demo_lawyer` | `ExpertDemo_2026!` |
+| Social teacher | `demo_social` | `ExpertDemo_2026!` |
+| Conflict specialist | `demo_conflict` | `ExpertDemo_2026!` |
+
+These credentials and Compose secrets are deterministic, **development-only** evaluator
+defaults. No real data is included. Production mode explicitly rejects the built-in demo
+cryptographic secrets; provide and rotate every database password, signing/HMAC secret,
+content-encryption key, and demo credential before any real deployment.
+
+The one-shot `bootstrap` service waits for healthy infrastructure, upgrades Alembic, and runs
+the idempotent reference, demo-staff/routing, and synthetic metadata scenario seeds. API and
+web startup depend on successful bootstrap completion. Seeds do not run inside normal API
+startup. The scenario contains only clearly synthetic operational metadata—no appeal body,
+message, note, contact, filename, track code, or other real/sensitive data.
 
 ## Architecture
 
@@ -34,8 +71,9 @@ and [MVP threat model](docs/threat-model.md) for the security assumptions and li
 
 ## Environment configuration
 
-Copy the root template and replace every placeholder secret before using a shared or
-production environment:
+The one-command development Compose path uses explicit demo-only defaults and does not require
+an `.env` file. For native local development, copy the root template and replace every
+placeholder secret before using a shared or production environment:
 
 ```powershell
 Copy-Item .env.example .env
@@ -72,6 +110,10 @@ The API reads the following environment variables:
 | `APPLICANT_MAX_RETURNS` | Maximum applicant returns after recommendations; defaults to 2 |
 | `EXPERT_COMPOSER_LOCK_TTL_SECONDS` | Valkey expert composer-lock TTL; defaults to 30 seconds |
 | `DEMO_*_LOGIN`, `DEMO_*_PASSWORD` | Development-only staff and specialist seed credentials |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` | Optional server-side SMTP transport (including Yandex SMTP) |
+| `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_USE_TLS` | Staff invitation sender and STARTTLS behavior |
+| `STAFF_INVITE_TTL_HOURS` | One-time invite/reset expiry; defaults to 24 hours |
+| `STAFF_FRONTEND_BASE_URL` | Server-side base URL used in setup links |
 | `LOG_LEVEL` | Python log level; defaults to `INFO` |
 | `CORS_ORIGINS` | Comma-separated origins or a JSON array |
 
@@ -96,10 +138,15 @@ The Compose stack uses service DNS names internally: the API connects to `postgr
 and `valkey:6379`. Database and Valkey host mappings remain bound to localhost only.
 
 ```powershell
-docker compose up -d postgres valkey
-docker compose run --rm api alembic upgrade head
+docker compose up --build
+```
+
+For detached operation and inspection:
+
+```powershell
 docker compose up --build -d
 docker compose ps
+docker compose logs bootstrap api web
 ```
 
 The local endpoints are:
@@ -198,7 +245,8 @@ active small ruleset once and applies Unicode/case/`ё` normalization, punctuati
 separation, whitespace collapse, and token-boundary literal matching. Compact matching is an
 explicit per-rule setting. Run `python -m app.scripts.seed_reference_data` after migration to
 create missing defaults idempotently; matching existing rows are not overwritten or
-reactivated. Phase 6 will expose administrator CRUD for crisis rules.
+reactivated. Administrators manage rules and can test transient text through the Phase 6A
+configuration API; tester input is neither stored nor audited.
 
 Crisis contact and attachment bytes use separate operator-only `no-store` endpoints. Contact
 reads are audited without the value. Attachments are integrity-checked and decrypted without
@@ -223,7 +271,7 @@ role authorization (403). Role alone never grants access to sensitive appeal con
 appeal-level policies must also evaluate assignment, participation, and workflow state.
 
 The minimal `/staff/login` page redirects authenticated users by role. The operator and expert
-routes host their Phase 4/5 workspaces; the administrator route remains a protected placeholder.
+routes host their Phase 4/5 workspaces; `/staff/admin` is the exact-role configuration workspace.
 
 ## Expert dialogue and resolution
 
@@ -269,7 +317,7 @@ Specialist passwords can be configured individually; when omitted they use
 Only missing rows are added; existing group metadata and relationships are never overwritten.
 It never prints passwords or stores plaintext passwords, never runs at API
 startup, and refuses production unless `--allow-production` is passed explicitly. The values
-in `.env.example` are demo-only placeholders and must not be used for a real deployment.
+in `.env.example` are deterministic demo-only credentials and must not be used for a real deployment.
 
 After starting the API, verify login while retaining the refresh cookie:
 
@@ -279,6 +327,58 @@ $login = Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/auth/l
 Invoke-RestMethod -Uri http://localhost:8000/api/v1/auth/me -Headers @{ Authorization = "Bearer $($login.access_token)" }
 Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/auth/refresh -WebSession $staffSession
 ```
+
+## Administrator configuration (Phase 6A)
+
+The protected `/staff/admin` workspace is the product configuration panel. Its Russian
+sections cover analytics overview, staff, metadata-only stuck appeals, audit, applicant types,
+categories, intake questions, specialist groups,
+expert memberships/capacity, category-to-group routing, crisis markers, crisis-support
+resources, and a read-only view of safe environment-backed product settings. Product roles
+remain fixed to `operator`, `expert`, and `admin`. Administrator APIs expose only staff and
+configuration metadata; they do not return appeal text, chat, notes, attachments, crisis
+contacts, return explanations, feedback/complaint plaintext, track material, ciphertext, or
+secrets.
+
+New staff accounts start without a password. Creating, reinviting, or resetting a staff
+account creates a 48-byte-random URL-safe one-time token, stores only its SHA-256 digest, and
+sends a setup link whose default lifetime is 24 hours. The `/staff/setup-password` page
+consumes the link once and stores only an Argon2 password hash. Password reset, role change,
+and deactivation revoke staff sessions as appropriate. SMTP is optional at startup; if it is
+not configured, the account and invitation remain saved and the admin receives a controlled
+“mail not sent” result. Configure the standard SMTP adapter with:
+
+```dotenv
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=
+SMTP_FROM_NAME=Отклик
+SMTP_USE_TLS=true
+STAFF_INVITE_TTL_HOURS=24
+STAFF_FRONTEND_BASE_URL=http://localhost:3000
+```
+
+Run `python -m app.scripts.seed_reference_data` after migration. It idempotently creates only
+missing starter applicant types, categories, four intake questions/mappings, and crisis rules;
+it does not overwrite or reactivate administrator-managed rows. Applicant type tone controls
+existing “ты/вы” copy. The public reference endpoint returns active applicant types,
+categories, category-mapped active questions, and active crisis-support resources in configured
+order. Server-side question validation enforces the current active field definition and
+allowed choice options before the answer JSON is encrypted.
+
+Routing configuration continues to use the Phase 2A `category_group_rules`, expert profiles,
+and group memberships, so operator recommendations reflect admin changes immediately. Crisis
+rules remain literal normalized phrases with an explicit compact-match switch—no regex, fuzzy
+matching, or executable configuration. Crisis-support resources are separate public system
+configuration and never contain the applicant's isolated crisis contact.
+
+Safe settings are deliberately read-only and environment-backed in this time-boxed phase.
+Database credentials, SMTP password, encryption key, JWT secrets, and HMAC secrets are never
+available through the admin API. Meaningful mutations write allowlisted audit events containing
+only configuration identifiers and safe field names; passwords, tokens, SMTP credentials, and
+tester/applicant input are excluded.
 
 ## Data model and privacy boundaries
 
@@ -312,7 +412,9 @@ Alembic uses the same `DATABASE_URL` setting as the application. Revision `20260
 enables pgvector; revision `20260909_0002` creates the Phase 2A schema without seed users or
 sensitive sample data; revision `20260909_0003` adds revocable staff sessions; revision
 `20260909_0004` adds persistent crisis rules and encrypted rejection explanations; revision
-`20260909_0005` adds encrypted transfer reasons and applicant return explanations:
+`20260909_0005` adds encrypted transfer reasons and applicant return explanations; revision
+`20260910_0006` adds staff invitation digests, dynamic applicant types/questions/mappings,
+staff email/profile metadata, and crisis-support configuration:
 
 ```powershell
 cd services/api
@@ -323,6 +425,38 @@ alembic current
 Create future revisions only after importing new SQLAlchemy models from
 `app/db/models/__init__.py` so `Base.metadata` can discover them. Persistence helpers belong
 in `app/db/repositories`; generic repository/factory layers are intentionally absent.
+
+## Evaluator acceptance checklist (C1–C8)
+
+1. **C1 — anonymous intake:** open `/`, create an appeal without registration, choose a
+   database-driven applicant type/category, answer configured questions, and save the one-time
+   track number.
+2. **C2 — anonymous return:** open “Проверить обращение”, enter the track number, and confirm
+   that the capability cookie opens a URL that contains no track code.
+3. **C3 — operator:** sign in as `demo_operator`, open the crisis/new queue, triage a case,
+   inspect sanitized attachments if present, and assign the recommended eligible expert.
+4. **C4 — expert:** sign in as the assigned expert, take the case into work, acquire the
+   composer lock, send an encrypted message, add a separate internal note, and prepare final
+   recommendations.
+5. **C5 — return/complete:** reopen the appeal by track, reply to clarification, choose “Это не
+   помогло” with an explanation and observe it return to the operator queue; on an
+   `answer_ready` case choose “Это помогло” and optionally submit feedback.
+6. **C6 — crisis:** submit text matching an active crisis rule; verify `crisis_flag` without
+   automatic urgent priority, the non-blocking support panel, and isolated optional contact.
+7. **C7 — administration:** sign in as `demo_admin`; create/edit a category, group, expert and
+   capacity, connect category → group → expert, verify the operator recommendation changes,
+   then use “Обращения” to intervene in a stuck case with a reason and verify the entry in
+   “Аудит”. The admin must never see appeal content.
+8. **C8 — analytics/export:** on admin “Обзор”, switch 7/30-day range, inspect KPI cards,
+   charts and workload, download CSV, and confirm it contains metadata/timings only.
+
+### Demo workflow notes
+
+The synthetic seeded appeals make C7/C8 visible immediately. To demonstrate the full live
+workflow with a new applicant submission, keep the displayed track number only in your test
+notes, assign through the operator UI, work it through the expert UI, then return to the public
+status page. Applicant credentials are never stored in browser storage, and specialist real
+names are never shown publicly.
 
 ## Tests and linting
 

@@ -77,9 +77,7 @@ async def create_appeal(
     request: Request,
     response: Response,
     service: Annotated[PublicAppealService, Depends(get_public_appeal_service)],
-    rate_limiter: Annotated[
-        PublicAppealRateLimiter, Depends(get_public_appeal_rate_limiter)
-    ],
+    rate_limiter: Annotated[PublicAppealRateLimiter, Depends(get_public_appeal_rate_limiter)],
 ) -> AppealCreatedResponse:
     await rate_limiter.check("submission", transient_ip=_transient_ip(request))
     result = await service.create_appeal(payload)
@@ -94,9 +92,7 @@ async def access_appeal(
     request: Request,
     response: Response,
     service: Annotated[PublicAppealService, Depends(get_public_appeal_service)],
-    rate_limiter: Annotated[
-        PublicAppealRateLimiter, Depends(get_public_appeal_rate_limiter)
-    ],
+    rate_limiter: Annotated[PublicAppealRateLimiter, Depends(get_public_appeal_rate_limiter)],
 ) -> AppealAccessResponse:
     await rate_limiter.check("track-access", transient_ip=_transient_ip(request))
     result = await service.access_appeal(payload.track_number.get_secret_value())

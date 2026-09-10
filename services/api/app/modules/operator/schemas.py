@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, SecretStr, model_validator
 from app.db.models.enums import (
     AppealPriority,
     AppealStatus,
-    ApplicantType,
     RejectionKind,
     TransferRequestStatus,
 )
@@ -28,7 +27,7 @@ class QueueCounters(BaseModel):
 
 class OperatorQueueItem(BaseModel):
     id: UUID
-    applicant_type: ApplicantType
+    applicant_type: str
     category: OperatorCategory | None
     status: AppealStatus
     priority: AppealPriority
@@ -97,9 +96,9 @@ class RoutingRecommendation(BaseModel):
 
 class OperatorAppealDetail(BaseModel):
     id: UUID
-    applicant_type: ApplicantType
+    applicant_type: str
     description: str | None
-    intake_answers: dict[str, str]
+    intake_answers: dict[str, str | bool | list[str]]
     category: OperatorCategory | None
     suggested_category: OperatorCategory | None
     status: AppealStatus

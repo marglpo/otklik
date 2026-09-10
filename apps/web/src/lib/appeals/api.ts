@@ -1,6 +1,13 @@
 import { apiClient } from "@/lib/api"
 
-export type ApplicantType = "student" | "parent" | "teacher"
+export type ApplicantType = string
+
+export type ApplicantTypeConfig = {
+  code: string
+  label: string
+  description: string | null
+  tone: "informal" | "formal"
+}
 
 export type Category = {
   id: string
@@ -15,7 +22,14 @@ export type IntakeQuestion = {
   prompt_student: string
   prompt_formal: string
   max_length: number
-  optional: true
+  optional: boolean
+  label: string
+  help_text: string | null
+  field_type: "short_text" | "long_text" | "single_choice" | "multi_choice" | "boolean"
+  options: string[]
+  required: boolean
+  category_ids: string[]
+  required_category_ids: string[]
 }
 
 export type CrisisResource = {
@@ -27,6 +41,7 @@ export type CrisisResource = {
 }
 
 export type PublicReference = {
+  applicant_types: ApplicantTypeConfig[]
   categories: Category[]
   intake_questions: IntakeQuestion[]
   crisis_support_resources: CrisisResource[]
@@ -69,7 +84,7 @@ export type CreateAppealInput = {
   applicant_type: ApplicantType
   category_id: string | null
   description: string | null
-  intake_answers: Record<string, string> | null
+  intake_answers: Record<string, string | boolean | string[]> | null
 }
 
 const credentialed = { credentials: "include" as const }

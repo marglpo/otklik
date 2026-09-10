@@ -29,7 +29,7 @@ export type RoutingCandidate = {
 
 export type OperatorAppealDetail = Omit<OperatorQueueItem, "assigned" | "waiting_since"> & {
   description: string | null
-  intake_answers: Record<string, string>
+  intake_answers: Record<string, string | boolean | string[]>
   suggested_category: Pick<Category, "id" | "slug" | "name"> | null
   updated_at: string
   operator_accepted_at: string | null

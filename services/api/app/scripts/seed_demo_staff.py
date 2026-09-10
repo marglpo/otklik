@@ -40,9 +40,7 @@ class DemoRoutingDefinition:
     category_slugs: frozenset[str]
 
 
-def _password_or_fallback(
-    value: SecretStr | None, fallback: SecretStr | None
-) -> SecretStr | None:
+def _password_or_fallback(value: SecretStr | None, fallback: SecretStr | None) -> SecretStr | None:
     if value is not None and value.get_secret_value():
         return value
     return fallback
@@ -84,9 +82,7 @@ def _definitions(settings: Settings) -> tuple[DemoStaffDefinition, ...]:
         ),
         DemoStaffDefinition(
             settings.demo_conflict_login,
-            _password_or_fallback(
-                settings.demo_conflict_password, settings.demo_expert_password
-            ),
+            _password_or_fallback(settings.demo_conflict_password, settings.demo_expert_password),
             "Конфликтолог",
             StaffRole.EXPERT,
         ),
@@ -112,9 +108,7 @@ def _routing_definitions(settings: Settings) -> tuple[DemoRoutingDefinition, ...
             normalize_login(settings.demo_psychologist_login),
             "psychologists",
             "Психологи",
-            frozenset(
-                {"bullying-insults", "cyberbullying", "pressure-threats", "parent-conflict"}
-            ),
+            frozenset({"bullying-insults", "cyberbullying", "pressure-threats", "parent-conflict"}),
         ),
         DemoRoutingDefinition(
             normalize_login(settings.demo_lawyer_login),
@@ -192,20 +186,25 @@ async def _seed_definitions(
             if definition.role is StaffRole.EXPERT:
                 profile = await repository.get_expert_profile(existing.id)
                 if profile is None:
-                    await repository.add_expert_profile(
-                        ExpertProfile(staff_user_id=existing.id)
-                    )
-                    await repository.commit()
+                    profile = ExpertProfile(staff_user_id=existing.id)
+                    await repository.add_expert_profile(profile)
+                if profile.public_specialist_label is None:
+                    profile.public_specialist_label = definition.display_name
+                await repository.commit()
             continue
         password = definition.password
         if password is None or not password.get_secret_value():
             raise RuntimeError("Demo staff passwords must be configured.")
-        await service.create_staff_user(
+        staff = await service.create_staff_user(
             login=login,
             password=password.get_secret_value(),
             role=definition.role,
             display_name=definition.display_name,
         )
+        profile = await repository.get_expert_profile(staff.id)
+        if profile is not None and profile.public_specialist_label is None:
+            profile.public_specialist_label = definition.display_name
+            await repository.commit()
         created += 1
     return created
 
@@ -244,9 +243,7 @@ class DemoRoutingSeedRepository:
 
     def add_membership(self, expert_id: UUID, group_id: UUID) -> None:
         self._session.add(
-            ExpertGroupMembership(
-                id=uuid4(), expert_id=expert_id, specialist_group_id=group_id
-            )
+            ExpertGroupMembership(id=uuid4(), expert_id=expert_id, specialist_group_id=group_id)
         )
 
     async def has_rule(self, category_id: UUID, group_id: UUID) -> bool:
@@ -262,9 +259,7 @@ class DemoRoutingSeedRepository:
 
     def add_rule(self, category_id: UUID, group_id: UUID) -> None:
         self._session.add(
-            CategoryGroupRule(
-                id=uuid4(), category_id=category_id, specialist_group_id=group_id
-            )
+            CategoryGroupRule(id=uuid4(), category_id=category_id, specialist_group_id=group_id)
         )
 
     async def commit(self) -> None:
@@ -283,8 +278,7 @@ async def _seed_demo_routing(
         expert = await repository.expert(definition.expert_login)
         if expert is None or expert.role is not StaffRole.EXPERT:
             raise RuntimeError(
-                f"Configured demo expert is unavailable for routing seed: "
-                f"{definition.expert_login}"
+                f"Configured demo expert is unavailable for routing seed: {definition.expert_login}"
             )
         group = await repository.group(definition.group_slug)
         if group is None:

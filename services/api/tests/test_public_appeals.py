@@ -18,15 +18,20 @@ from app.db.models import (
     AppealMessage,
     AppealRejection,
     AppealReturnExplanation,
+    ApplicantTypeConfig,
     Category,
+    CategoryIntakeQuestion,
     CrisisContact,
+    IntakeQuestion,
     StaffComplaint,
     StatusHistory,
 )
 from app.db.models.enums import (
     AppealPriority,
     AppealStatus,
+    ApplicantTone,
     ApplicantType,
+    IntakeFieldType,
     MessageAuthorType,
     RejectionKind,
 )
@@ -55,7 +60,7 @@ from app.modules.appeals.track import (
     generate_track_number,
     normalize_track_number,
 )
-from app.modules.categories.reference_data import STARTER_CATEGORIES
+from app.modules.categories.reference_data import INTAKE_QUESTIONS, STARTER_CATEGORIES
 from app.modules.crisis.detector import CrisisRulePattern
 from app.modules.crisis.service import CrisisRuleService
 from app.scripts.seed_reference_data import seed_categories
@@ -76,12 +81,71 @@ class FakePublicRepository:
         self.returns: list[AppealReturnExplanation] = []
         self.deactivated_appeals: set[UUID] = set()
         self.commits = 0
+        self.applicant_types = {
+            item.value: ApplicantTypeConfig(
+                id=uuid4(),
+                code=item.value,
+                label=item.value.title(),
+                description=None,
+                tone=(
+                    ApplicantTone.INFORMAL
+                    if item is ApplicantType.STUDENT
+                    else ApplicantTone.FORMAL
+                ),
+                is_active=True,
+                sort_order=index * 10,
+            )
+            for index, item in enumerate(ApplicantType, start=1)
+        }
+        self.questions = [
+            IntakeQuestion(
+                id=uuid4(),
+                code=item.id,
+                label=item.prompt_formal,
+                help_text=None,
+                field_type=IntakeFieldType.SHORT_TEXT,
+                options_json=[],
+                required=False,
+                is_active=True,
+                sort_order=index * 10,
+            )
+            for index, item in enumerate(INTAKE_QUESTIONS, start=1)
+        ]
+        self.question_mappings = [
+            CategoryIntakeQuestion(
+                id=uuid4(),
+                category_id=category.id,
+                question_id=question.id,
+                sort_order=index * 10,
+            )
+            for category in self.categories.values()
+            for index, question in enumerate(self.questions, start=1)
+        ]
 
     async def list_active_categories(self) -> list[Category]:
         return sorted(
             (category for category in self.categories.values() if category.is_active),
             key=lambda category: category.sort_order,
         )
+
+    async def list_active_applicant_types(self):
+        return list(self.applicant_types.values())
+
+    async def get_active_applicant_type(self, code):
+        item = self.applicant_types.get(code)
+        return item if item and item.is_active else None
+
+    async def get_applicant_type_by_code(self, code):
+        return self.applicant_types.get(code)
+
+    async def list_active_intake_questions(self):
+        return [item for item in self.questions if item.is_active]
+
+    async def list_question_mappings(self):
+        return self.question_mappings
+
+    async def list_active_crisis_support_resources(self):
+        return []
 
     async def get_category(self, category_id: UUID) -> Category | None:
         return self.categories.get(category_id)
@@ -286,12 +350,13 @@ async def test_free_text_and_answers_are_encrypted_separately(test_settings) -> 
     crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
 
     assert description.encode() not in content.encrypted_content
-    assert crypto.decrypt_text(
-        content.encrypted_content, aad=appeal_content_aad(appeal.id)
-    ) == description
-    assert crypto.decrypt_json(
-        intake.encrypted_payload, aad=intake_answers_aad(appeal.id)
-    ) == answers
+    assert (
+        crypto.decrypt_text(content.encrypted_content, aad=appeal_content_aad(appeal.id))
+        == description
+    )
+    assert (
+        crypto.decrypt_json(intake.encrypted_payload, aad=intake_answers_aad(appeal.id)) == answers
+    )
     assert result.response.status is AppealStatus.NEW
 
 
@@ -341,9 +406,10 @@ async def test_crisis_contact_is_encrypted_and_isolated(test_settings) -> None:
     crypto = ContentCrypto(test_settings.content_encryption_key.get_secret_value())
 
     assert contact_value.encode() not in contact.encrypted_contact
-    assert crypto.decrypt_text(
-        contact.encrypted_contact, aad=crisis_contact_aad(appeal.id)
-    ) == contact_value
+    assert (
+        crypto.decrypt_text(contact.encrypted_contact, aad=crisis_contact_aad(appeal.id))
+        == contact_value
+    )
     assert "contact" not in Appeal.__table__.columns
 
 
@@ -453,9 +519,7 @@ async def test_public_api_sets_secure_httponly_cookie_in_production(test_setting
     app.dependency_overrides[get_public_appeal_service] = lambda: service
     app.dependency_overrides[get_public_appeal_rate_limiter] = lambda: NoopPublicRateLimiter()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/v1/public/appeals",
             json={"applicant_type": "student", "category_id": str(category.id)},
@@ -477,6 +541,70 @@ async def test_reference_includes_unsure_category_and_four_optional_questions(
     assert response.categories[0].requires_description is True
     assert len(response.intake_questions) == 4
     assert all(question.optional for question in response.intake_questions)
+
+
+async def test_dynamic_applicant_type_and_question_are_validated_and_encrypted(
+    test_settings,
+) -> None:
+    category = _category()
+    service, repository = _service(test_settings, [category])
+    custom_type = ApplicantTypeConfig(
+        id=uuid4(),
+        code="graduate",
+        label="Выпускник",
+        description=None,
+        tone=ApplicantTone.FORMAL,
+        is_active=True,
+        sort_order=5,
+    )
+    repository.applicant_types[custom_type.code] = custom_type
+    question = IntakeQuestion(
+        id=uuid4(),
+        code="location-kind",
+        label="Где это происходит?",
+        help_text=None,
+        field_type=IntakeFieldType.SINGLE_CHOICE,
+        options_json=["Онлайн", "В школе"],
+        required=True,
+        is_active=True,
+        sort_order=1,
+    )
+    repository.questions.append(question)
+    repository.question_mappings.append(
+        CategoryIntakeQuestion(
+            id=uuid4(),
+            category_id=category.id,
+            question_id=question.id,
+            sort_order=1,
+        )
+    )
+
+    created = await service.create_appeal(
+        AppealCreateRequest(
+            applicant_type="graduate",
+            category_id=category.id,
+            intake_answers={"location-kind": "Онлайн"},
+        )
+    )
+    appeal = next(iter(repository.appeals.values()))
+    decrypted = ContentCrypto(
+        test_settings.content_encryption_key.get_secret_value()
+    ).decrypt_json(
+        repository.answers[appeal.id].encrypted_payload,
+        aad=intake_answers_aad(appeal.id),
+    )
+    assert appeal.applicant_type == "graduate"
+    assert decrypted == {"location-kind": "Онлайн"}
+    assert created.response.status_text
+
+    with pytest.raises(ValidationError):
+        await service.create_appeal(
+            AppealCreateRequest(
+                applicant_type="graduate",
+                category_id=category.id,
+                intake_answers={"location-kind": "Неизвестно"},
+            )
+        )
 
 
 async def test_reference_seed_is_idempotent() -> None:
@@ -549,9 +677,12 @@ async def test_public_chat_encrypts_applicant_reply_and_hides_staff_identity(
     response = await service.messages(appeal_id)
     applicant = repository.messages[appeal_id][1]
 
-    assert crypto.decrypt_text(
-        applicant.encrypted_body, aad=appeal_message_aad(appeal_id, applicant.id)
-    ) == "Мой ответ"
+    assert (
+        crypto.decrypt_text(
+            applicant.encrypted_body, aad=appeal_message_aad(appeal_id, applicant.id)
+        )
+        == "Мой ответ"
+    )
     assert applicant.author_staff_user_id is None
     assert [item.author_label for item in response.messages] == ["Специалист", "Вы"]
     serialized = response.model_dump_json()
@@ -586,10 +717,13 @@ async def test_resolution_encrypts_returns_enforces_limit_and_completes(test_set
             explanation=f"Не хватило шага {number}",
         )
         stored = repository.returns[-1]
-        assert crypto.decrypt_text(
-            stored.encrypted_body,
-            aad=return_explanation_aad(appeal_id, stored.id),
-        ) == f"Не хватило шага {number}"
+        assert (
+            crypto.decrypt_text(
+                stored.encrypted_body,
+                aad=return_explanation_aad(appeal_id, stored.id),
+            )
+            == f"Не хватило шага {number}"
+        )
     assert appeal.return_count == 2
     assert appeal_id in repository.deactivated_appeals
     appeal.status = AppealStatus.ANSWER_READY
@@ -601,9 +735,7 @@ async def test_resolution_encrypts_returns_enforces_limit_and_completes(test_set
     second_id = second_service.decode_access_token(second.access_token)
     second_repository.appeals[second_id].status = AppealStatus.ANSWER_READY
     completed_at = datetime(2026, 9, 10, tzinfo=UTC)
-    await second_service.resolve(
-        second_id, choice="helped", explanation=None, now=completed_at
-    )
+    await second_service.resolve(second_id, choice="helped", explanation=None, now=completed_at)
     assert second_repository.appeals[second_id].status is AppealStatus.COMPLETED
     assert second_repository.appeals[second_id].completed_at == completed_at
 
@@ -623,11 +755,17 @@ async def test_feedback_and_complaint_sensitive_text_is_encrypted(test_settings)
 
     stored_feedback = repository.feedback[0]
     stored_complaint = repository.complaints[0]
-    assert crypto.decrypt_text(
-        stored_feedback.encrypted_comment,
-        aad=feedback_comment_aad(appeal_id, stored_feedback.id),
-    ) == "Полезный комментарий"
-    assert crypto.decrypt_text(
-        stored_complaint.encrypted_body,
-        aad=complaint_body_aad(appeal_id, stored_complaint.id),
-    ) == "Текст жалобы"
+    assert (
+        crypto.decrypt_text(
+            stored_feedback.encrypted_comment,
+            aad=feedback_comment_aad(appeal_id, stored_feedback.id),
+        )
+        == "Полезный комментарий"
+    )
+    assert (
+        crypto.decrypt_text(
+            stored_complaint.encrypted_body,
+            aad=complaint_body_aad(appeal_id, stored_complaint.id),
+        )
+        == "Текст жалобы"
+    )

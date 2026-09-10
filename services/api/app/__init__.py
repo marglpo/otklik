@@ -1,2 +1,1 @@
 """Otklik API application package."""
-

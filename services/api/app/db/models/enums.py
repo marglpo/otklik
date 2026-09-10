@@ -9,6 +9,24 @@ class ApplicantType(StrEnum):
     TEACHER = "teacher"
 
 
+class ApplicantTone(StrEnum):
+    INFORMAL = "informal"
+    FORMAL = "formal"
+
+
+class IntakeFieldType(StrEnum):
+    SHORT_TEXT = "short_text"
+    LONG_TEXT = "long_text"
+    SINGLE_CHOICE = "single_choice"
+    MULTI_CHOICE = "multi_choice"
+    BOOLEAN = "boolean"
+
+
+class StaffInvitationPurpose(StrEnum):
+    INVITATION = "invitation"
+    PASSWORD_RESET = "password_reset"
+
+
 class StaffRole(StrEnum):
     OPERATOR = "operator"
     EXPERT = "expert"

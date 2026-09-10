@@ -35,6 +35,7 @@ def _sensitive_values(settings: Settings) -> list[str]:
         settings.demo_social_password,
         settings.demo_conflict_password,
         settings.demo_admin_password,
+        settings.smtp_password,
     ):
         if secret is not None:
             values.append(secret.get_secret_value())

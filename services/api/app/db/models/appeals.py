@@ -26,7 +26,6 @@ from app.db.models.enums import (
     AppealParticipantRole,
     AppealPriority,
     AppealStatus,
-    ApplicantType,
     MessageAuthorType,
     RejectionKind,
     TransferRequestStatus,
@@ -45,17 +44,15 @@ class Appeal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="appeals_suggested_score_range",
         ),
         CheckConstraint("return_count >= 0", name="appeals_nonnegative_return_count"),
-        CheckConstraint(
-            "octet_length(track_digest) = 32", name="appeals_track_digest_length"
-        ),
+        CheckConstraint("octet_length(track_digest) = 32", name="appeals_track_digest_length"),
         Index("ix_appeals_track_digest", "track_digest", unique=True),
         Index("ix_appeals_status_created_at", "status", "created_at"),
         Index("ix_appeals_assigned_expert_status", "assigned_expert_id", "status"),
     )
 
     track_digest: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
-    applicant_type: Mapped[ApplicantType] = mapped_column(
-        string_enum(ApplicantType, name="applicant_type"), nullable=False
+    applicant_type: Mapped[str] = mapped_column(
+        String(50), ForeignKey("applicant_types.code", ondelete="RESTRICT"), nullable=False
     )
     category_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL")
@@ -83,9 +80,7 @@ class Appeal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("expert_profiles.staff_user_id", ondelete="SET NULL")
     )
     operator_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    first_specialist_response_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    first_specialist_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     answer_ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     return_count: Mapped[int] = mapped_column(
@@ -109,9 +104,7 @@ class AppealContent(TimestampMixin, Base):
 class AppealIntakeAnswer(TimestampMixin, Base):
     __tablename__ = "appeal_intake_answers"
     __table_args__ = (
-        CheckConstraint(
-            "key_version > 0", name="appeal_intake_answers_positive_key_version"
-        ),
+        CheckConstraint("key_version > 0", name="appeal_intake_answers_positive_key_version"),
     )
 
     appeal_id: Mapped[UUID] = mapped_column(
@@ -320,9 +313,7 @@ class AppealReturnExplanation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         CheckConstraint(
             "return_number > 0", name="appeal_return_explanations_positive_return_number"
         ),
-        CheckConstraint(
-            "key_version > 0", name="appeal_return_explanations_positive_key_version"
-        ),
+        CheckConstraint("key_version > 0", name="appeal_return_explanations_positive_key_version"),
         Index(
             "ix_appeal_return_explanations_appeal_created",
             "appeal_id",

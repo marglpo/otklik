@@ -6,6 +6,7 @@ import Link from "next/link"
 import { CrisisPanel } from "@/components/appeals/crisis-panel"
 import { PublicShell } from "@/components/appeals/public-shell"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,6 +18,7 @@ import {
 } from "@/lib/appeals"
 
 type PathChoice = "category" | "words"
+type AnswerValue = string | boolean | string[]
 
 export default function NewAppealPage() {
   const [reference, setReference] = useState<PublicReference | null>(null)
@@ -24,7 +26,7 @@ export default function NewAppealPage() {
   const [pathChoice, setPathChoice] = useState<PathChoice>("category")
   const [categoryId, setCategoryId] = useState("")
   const [description, setDescription] = useState("")
-  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [answers, setAnswers] = useState<Record<string, AnswerValue>>({})
   const [files, setFiles] = useState<File[]>([])
   const [failedFiles, setFailedFiles] = useState<File[]>([])
   const [created, setCreated] = useState<CreatedAppeal | null>(null)
@@ -37,12 +39,17 @@ export default function NewAppealPage() {
     const controller = new AbortController()
     publicAppealsApi
       .reference(controller.signal)
-      .then(setReference)
+      .then((result) => {
+        setReference(result)
+        if (result.applicant_types.length) setApplicantType(result.applicant_types[0].code)
+      })
       .catch(() => setError("Не удалось загрузить форму. Попробуйте обновить страницу."))
     return () => controller.abort()
   }, [])
 
-  const formal = applicantType !== "student"
+  const formal =
+    reference?.applicant_types.find((item) => item.code === applicantType)?.tone !==
+    "informal"
   const selectedCategory = useMemo(
     () => reference?.categories.find((category) => category.id === categoryId),
     [categoryId, reference]
@@ -82,7 +89,9 @@ export default function NewAppealPage() {
     setBusy(true)
     try {
       const nonemptyAnswers = Object.fromEntries(
-        Object.entries(answers).filter(([, value]) => value.trim())
+        Object.entries(answers).filter(([, value]) =>
+          Array.isArray(value) ? value.length > 0 : typeof value === "string" ? value.trim() : true
+        )
       )
       const result = await publicAppealsApi.create({
         applicant_type: applicantType,
@@ -218,23 +227,19 @@ export default function NewAppealPage() {
 
         <fieldset className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200">
           <legend className="px-1 font-semibold">Кто обращается?</legend>
-          <div className="grid grid-cols-3 gap-2">
-            {([
-              ["student", "Ученик"],
-              ["parent", "Родитель"],
-              ["teacher", "Учитель"],
-            ] as const).map(([value, label]) => (
+          <div className="grid gap-2 sm:grid-cols-3">
+            {reference?.applicant_types.map((item) => (
               <button
-                key={value}
+                key={item.code}
                 type="button"
                 className={`rounded-xl px-3 py-3 text-sm font-medium ring-1 ${
-                  applicantType === value
+                  applicantType === item.code
                     ? "bg-teal-700 text-white ring-teal-700"
                     : "bg-white ring-slate-300"
                 }`}
-                onClick={() => setApplicantType(value)}
+                onClick={() => setApplicantType(item.code)}
               >
-                {label}
+                {item.label}
               </button>
             ))}
           </div>
@@ -306,21 +311,103 @@ export default function NewAppealPage() {
             <h2 className="font-semibold">Несколько уточнений</h2>
             <p className="text-sm text-slate-600">Можно пропустить любой вопрос.</p>
           </div>
-          {reference?.intake_questions.map((question) => (
-            <div key={question.id} className="space-y-2">
-              <Label htmlFor={question.id}>
-                {formal ? question.prompt_formal : question.prompt_student}
-              </Label>
-              <Input
-                id={question.id}
-                maxLength={question.max_length}
-                value={answers[question.id] ?? ""}
-                onChange={(event) =>
-                  setAnswers((current) => ({ ...current, [question.id]: event.target.value }))
-                }
-              />
-            </div>
-          ))}
+          {reference?.intake_questions
+            .filter((question) => !categoryId || question.category_ids.includes(categoryId))
+            .map((question) => {
+              const required =
+                question.required || question.required_category_ids.includes(categoryId)
+              const value = answers[question.id]
+              return (
+                <div key={question.id} className="space-y-2">
+                  <Label htmlFor={question.id}>
+                    {question.label} {required ? "*" : ""}
+                  </Label>
+                  {question.help_text ? (
+                    <p className="text-xs text-slate-500">{question.help_text}</p>
+                  ) : null}
+                  {question.field_type === "long_text" ? (
+                    <Textarea
+                      id={question.id}
+                      required={required}
+                      maxLength={question.max_length}
+                      value={typeof value === "string" ? value : ""}
+                      onChange={(event) =>
+                        setAnswers((current) => ({
+                          ...current,
+                          [question.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  ) : question.field_type === "single_choice" ? (
+                    <select
+                      id={question.id}
+                      required={required}
+                      className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm"
+                      value={typeof value === "string" ? value : ""}
+                      onChange={(event) =>
+                        setAnswers((current) => ({
+                          ...current,
+                          [question.id]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Выберите вариант</option>
+                      {question.options.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  ) : question.field_type === "multi_choice" ? (
+                    <div className="space-y-2">
+                      {question.options.map((option) => {
+                        const selected = Array.isArray(value) ? value : []
+                        return (
+                          <label key={option} className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={selected.includes(option)}
+                              onCheckedChange={(checked) =>
+                                setAnswers((current) => ({
+                                  ...current,
+                                  [question.id]: checked
+                                    ? [...selected, option]
+                                    : selected.filter((item) => item !== option),
+                                }))
+                              }
+                            />
+                            {option}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  ) : question.field_type === "boolean" ? (
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={value === true}
+                        onCheckedChange={(checked) =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.id]: checked === true,
+                          }))
+                        }
+                      />
+                      Да
+                    </label>
+                  ) : (
+                    <Input
+                      id={question.id}
+                      required={required}
+                      maxLength={question.max_length}
+                      value={typeof value === "string" ? value : ""}
+                      onChange={(event) =>
+                        setAnswers((current) => ({
+                          ...current,
+                          [question.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  )}
+                </div>
+              )
+            })}
         </section>
 
         <section className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200">

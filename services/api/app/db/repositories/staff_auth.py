@@ -37,9 +37,7 @@ class StaffAuthRepository:
     async def get_session_by_id(self, session_id: UUID) -> StaffSession | None:
         return await self._session.get(StaffSession, session_id)
 
-    async def get_session_by_refresh_digest_for_update(
-        self, digest: bytes
-    ) -> StaffSession | None:
+    async def get_session_by_refresh_digest_for_update(self, digest: bytes) -> StaffSession | None:
         statement = (
             select(StaffSession)
             .where(StaffSession.refresh_token_digest == digest)

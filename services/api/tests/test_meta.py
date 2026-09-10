@@ -17,4 +17,3 @@ async def test_meta_returns_only_public_runtime_information(test_settings: Setti
         "api_version": "v1",
     }
     assert "secret" not in response.text.lower()
-

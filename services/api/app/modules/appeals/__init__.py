@@ -1,2 +1,1 @@
 """Appeals module placeholder."""
-

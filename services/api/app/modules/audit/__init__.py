@@ -1,2 +1,1 @@
 """Audit module placeholder."""
-

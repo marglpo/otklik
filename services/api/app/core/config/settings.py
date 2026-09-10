@@ -58,9 +58,7 @@ class Settings(BaseSettings):
     jwt_audience: str = Field(default="otklik-staff", min_length=1, max_length=200)
     access_token_ttl_minutes: int = Field(default=15, ge=1, le=60)
     refresh_session_ttl_days: int = Field(default=7, ge=1, le=30)
-    refresh_cookie_name: str = Field(
-        default="otklik_staff_refresh", pattern=r"^[A-Za-z0-9_-]+$"
-    )
+    refresh_cookie_name: str = Field(default="otklik_staff_refresh", pattern=r"^[A-Za-z0-9_-]+$")
     login_rate_limit_attempts: int = Field(default=5, ge=1, le=100)
     login_rate_limit_window_seconds: int = Field(default=300, ge=1, le=3600)
 
@@ -79,6 +77,18 @@ class Settings(BaseSettings):
     operator_overdue_hours: int = Field(default=24, ge=1, le=720)
     applicant_max_returns: int = Field(default=2, ge=1, le=5)
     expert_composer_lock_ttl_seconds: int = Field(default=30, ge=10, le=120)
+
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from_email: str | None = None
+    smtp_from_name: str = Field(default="Отклик", min_length=1, max_length=120)
+    smtp_use_tls: bool = True
+    staff_invite_ttl_hours: int = Field(default=24, ge=1, le=168)
+    staff_frontend_base_url: str = Field(
+        default="http://localhost:3000", min_length=1, max_length=500
+    )
 
     attachment_storage_path: Path = Path("var/private/attachments")
     attachment_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
@@ -180,6 +190,23 @@ class Settings(BaseSettings):
         ]
         if missing:
             raise ValueError(f"Production requires environment variables: {', '.join(missing)}")
+        insecure_demo_values = {
+            "demo-only-jwt-secret-change-before-prod-2026",
+            "demo-only-track-hmac-change-before-prod-2026",
+            "demo-only-rate-hmac-change-before-prod-2026",
+            "demo-only-refresh-hmac-change-before-prod-2026",
+            "demo-only-applicant-jwt-change-before-prod-2026",
+            "b3RrbGlrLWRlbW8tY29udGVudC1rZXktMzItYnl0ZSE=",
+        }
+        demo_secrets = [
+            name
+            for name, value in secrets.items()
+            if value is not None and value.get_secret_value() in insecure_demo_values
+        ]
+        if demo_secrets:
+            raise ValueError(
+                "Production forbids built-in demo secrets: " + ", ".join(demo_secrets)
+            )
         short_secrets = [
             name
             for name, value in secrets.items()
@@ -209,6 +236,10 @@ class Settings(BaseSettings):
     @property
     def applicant_access_cookie_secure(self) -> bool:
         return self.app_env is AppEnvironment.PRODUCTION
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_from_email)
 
 
 @lru_cache

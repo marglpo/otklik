@@ -47,16 +47,18 @@ class AuthService:
         self._tokens = AccessTokenService(settings)
         self._rate_limiter = rate_limiter
 
-    async def login(
-        self, *, login: str, password: str, transient_ip: str
-    ) -> AuthenticationResult:
+    async def login(self, *, login: str, password: str, transient_ip: str) -> AuthenticationResult:
         normalized_login = normalize_login(login)
         await self._rate_limiter.check(
             transient_ip=transient_ip,
             normalized_login=normalized_login,
         )
         staff = await self._repository.get_staff_by_login(normalized_login)
-        password_hash = staff.password_hash if staff is not None else _DUMMY_PASSWORD_HASH
+        password_hash = (
+            staff.password_hash
+            if staff is not None and staff.password_hash is not None
+            else _DUMMY_PASSWORD_HASH
+        )
         valid_password = verify_password(password, password_hash)
         if staff is None or not valid_password or not staff.is_active:
             raise UnauthorizedError(INVALID_CREDENTIALS)
@@ -70,6 +72,7 @@ class AuthService:
             expires_at=now + timedelta(days=self._settings.refresh_session_ttl_days),
             rotation_counter=0,
         )
+        staff.last_login_at = now
         await self._repository.add_session(session)
         await self._repository.commit()
         return self._result(staff, session, raw_refresh_token, now=now)

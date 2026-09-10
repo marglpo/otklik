@@ -29,24 +29,18 @@ def decode_content_encryption_key(encoded_key: str) -> bytes:
     if not candidate:
         raise InvalidEncryptionKeyError("Content encryption key must not be empty")
     if re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", candidate) is None:
-        raise InvalidEncryptionKeyError(
-            "Content encryption key must be valid URL-safe base64"
-        )
+        raise InvalidEncryptionKeyError("Content encryption key must be valid URL-safe base64")
 
     padding = "=" * (-len(candidate) % 4)
     try:
-        key = base64.b64decode(
-            (candidate + padding).encode("ascii"), altchars=b"-_", validate=True
-        )
+        key = base64.b64decode((candidate + padding).encode("ascii"), altchars=b"-_", validate=True)
     except (UnicodeEncodeError, binascii.Error, ValueError) as error:
         raise InvalidEncryptionKeyError(
             "Content encryption key must be valid URL-safe base64"
         ) from error
 
     if len(key) != 32:
-        raise InvalidEncryptionKeyError(
-            "Content encryption key must decode to exactly 32 bytes"
-        )
+        raise InvalidEncryptionKeyError("Content encryption key must decode to exactly 32 bytes")
     return key
 
 

@@ -21,19 +21,24 @@ def test_phase_2a_defines_expected_tables() -> None:
         "appeal_participants",
         "appeal_rejections",
         "appeal_return_explanations",
+        "applicant_types",
         "appeals",
         "assignment_history",
         "attachments",
         "audit_log",
         "categories",
         "category_group_rules",
+        "category_intake_questions",
         "crisis_contacts",
         "crisis_rules",
+        "crisis_support_resources",
         "expert_group_memberships",
         "expert_profiles",
         "internal_notes",
+        "intake_questions",
         "specialist_groups",
         "staff_complaints",
+        "staff_invitations",
         "staff_sessions",
         "staff_users",
         "status_history",
@@ -74,8 +79,22 @@ def test_models_do_not_expose_applicant_identity_fields() -> None:
         "user_agent",
     }
 
+    anonymous_domain_tables = {
+        "appeals",
+        "appeal_contents",
+        "appeal_intake_answers",
+        "appeal_messages",
+        "appeal_feedback",
+        "appeal_return_explanations",
+        "attachments",
+        "crisis_contacts",
+        "staff_complaints",
+    }
     all_columns = {
-        column.name for table in Base.metadata.tables.values() for column in table.columns
+        column.name
+        for name, table in Base.metadata.tables.items()
+        if name in anonymous_domain_tables
+        for column in table.columns
     }
     assert forbidden_columns.isdisjoint(all_columns)
 

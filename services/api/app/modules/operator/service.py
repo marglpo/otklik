@@ -430,10 +430,10 @@ class OperatorService:
         if transfer.status is not TransferRequestStatus.PENDING:
             raise ConflictError("Transfer request has already been resolved.")
         current_time = now or datetime.now(UTC)
-        transfer.resolved_by_staff_user_id = operator_id
-        transfer.resolved_at = current_time
         if not approve:
             transfer.status = TransferRequestStatus.REJECTED
+            transfer.resolved_by_staff_user_id = operator_id
+            transfer.resolved_at = current_time
             await self._repository.add_all(
                 [
                     self._audit(
@@ -483,6 +483,14 @@ class OperatorService:
         previous_expert = appeal.assigned_expert_id
         previous_status = appeal.status
         primary = await self._repository.current_primary(appeal.id)
+
+        # Keep the request valid at every flush boundary. In particular, the primary
+        # participant must be flushed inactive before a replacement primary can be
+        # inserted, and PostgreSQL correctly rejects resolution metadata on a request
+        # whose status is still pending.
+        transfer.status = TransferRequestStatus.APPROVED
+        transfer.resolved_by_staff_user_id = operator_id
+        transfer.resolved_at = current_time
         if primary is not None and primary.staff_user_id != target_id:
             primary.is_active = False
             primary.left_at = current_time
@@ -503,7 +511,6 @@ class OperatorService:
             target_participant.participant_role = AppealParticipantRole.PRIMARY
         appeal.assigned_expert_id = target_id
         appeal.status = AppealStatus.IN_PROGRESS
-        transfer.status = TransferRequestStatus.APPROVED
         records.append(
             AssignmentHistory(
                 id=uuid4(),
@@ -609,7 +616,15 @@ class OperatorService:
             else {}
         )
         intake = (
-            {str(key): str(value) for key, value in intake_value.items()}
+            {
+                str(key): value
+                for key, value in intake_value.items()
+                if isinstance(value, (str, bool))
+                or (
+                    isinstance(value, list)
+                    and all(isinstance(choice, str) for choice in value)
+                )
+            }
             if isinstance(intake_value, dict)
             else {}
         )

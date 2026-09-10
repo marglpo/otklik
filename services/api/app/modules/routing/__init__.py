@@ -1,2 +1,1 @@
 """Appeal routing module placeholder."""
-

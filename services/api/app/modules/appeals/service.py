@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -41,6 +42,7 @@ from app.modules.appeals.crypto_context import (
 from app.modules.appeals.schemas import (
     AppealCreatedResponse,
     AppealCreateRequest,
+    ApplicantTypePublic,
     CategoryPublic,
     CrisisSupportResourcePublic,
     CurrentAppealResponse,
@@ -54,10 +56,7 @@ from app.modules.appeals.schemas import (
 from app.modules.appeals.status import applicant_status_text
 from app.modules.appeals.track import generate_track_number, normalize_track_number
 from app.modules.appeals.transitions import require_applicant_transition
-from app.modules.categories.reference_data import (
-    INTAKE_QUESTIONS,
-    UNKNOWN_CATEGORY_SLUG,
-)
+from app.modules.categories.reference_data import UNKNOWN_CATEGORY_SLUG
 from app.modules.crisis.detector import CrisisDetector
 from app.modules.crisis.service import CrisisRuleService
 
@@ -99,29 +98,54 @@ class PublicAppealService:
 
     async def public_reference(self) -> PublicReferenceResponse:
         categories = await self._repository.list_active_categories()
+        applicant_types = await self._repository.list_active_applicant_types()
+        questions = await self._repository.list_active_intake_questions()
+        mappings = await self._repository.list_question_mappings()
+        category_ids: dict[UUID, list[UUID]] = {}
+        required_category_ids: dict[UUID, list[UUID]] = {}
+        for mapping in mappings:
+            category_ids.setdefault(mapping.question_id, []).append(mapping.category_id)
+            if mapping.required_override is True:
+                required_category_ids.setdefault(mapping.question_id, []).append(
+                    mapping.category_id
+                )
         return PublicReferenceResponse(
+            applicant_types=[
+                ApplicantTypePublic(
+                    code=item.code,
+                    label=item.label,
+                    description=item.description,
+                    tone=item.tone,
+                )
+                for item in applicant_types
+            ],
             categories=[self._category_public(category) for category in categories],
             intake_questions=[
                 IntakeQuestionPublic(
-                    id=question.id,
-                    prompt_student=question.prompt_student,
-                    prompt_formal=question.prompt_formal,
-                    max_length=question.max_length,
+                    id=question.code,
+                    prompt_student=question.label,
+                    prompt_formal=question.label,
+                    label=question.label,
+                    help_text=question.help_text,
+                    field_type=question.field_type,
+                    options=question.options_json,
+                    required=question.required,
+                    optional=not question.required,
+                    category_ids=category_ids.get(question.id, []),
+                    required_category_ids=required_category_ids.get(question.id, []),
+                    max_length=(500 if question.field_type.value == "short_text" else 2000),
                 )
-                for question in INTAKE_QUESTIONS
+                for question in questions
             ],
-            crisis_support_resources=self._crisis_resources(),
+            crisis_support_resources=await self._crisis_resources(),
         )
 
     async def create_appeal(self, payload: AppealCreateRequest) -> CreatedAppealResult:
-        description = (
-            payload.description.get_secret_value().strip() if payload.description else ""
-        )
-        intake_answers = {
-            question_id: answer.get_secret_value().strip()
-            for question_id, answer in (payload.intake_answers or {}).items()
-            if answer.get_secret_value().strip()
-        }
+        description = payload.description.get_secret_value().strip() if payload.description else ""
+        applicant_type = await self._repository.get_active_applicant_type(payload.applicant_type)
+        if applicant_type is None:
+            raise ValidationError("Choose an available applicant type.")
+        intake_answers = self._plain_intake_answers(payload.intake_answers or {})
         category = None
         if payload.category_id is not None:
             category = await self._repository.get_category(payload.category_id)
@@ -132,11 +156,16 @@ class PublicAppealService:
         if category is None and not description:
             raise ValidationError("Choose a category or describe the situation.")
 
+        intake_answers = await self._validated_intake_answers(
+            intake_answers, category_id=category.id if category else None
+        )
+
         patterns = (
             await self._crisis_rules.active_patterns() if self._crisis_rules is not None else None
         )
         detector = CrisisDetector(patterns) if patterns is not None else CrisisDetector()
-        crisis_flag = detector.detect([description, *intake_answers.values()])
+        crisis_flag = detector.detect([description, *self._answer_text_values(intake_answers)])
+        crisis_resources = await self._crisis_resources()
         for _attempt in range(5):
             track_number = generate_track_number()
             track_digest = track_lookup_digest(self._track_secret, track_number)
@@ -146,7 +175,7 @@ class PublicAppealService:
             appeal = Appeal(
                 id=appeal_id,
                 track_digest=track_digest,
-                applicant_type=payload.applicant_type,
+                applicant_type=applicant_type.code,
                 category_id=category.id if category else None,
                 status=AppealStatus.NEW,
                 priority=AppealPriority.STANDARD,
@@ -183,9 +212,7 @@ class PublicAppealService:
                 changed_by_staff_user_id=None,
             )
             try:
-                await self._repository.add_appeal_bundle(
-                    appeal, content, answers, initial_history
-                )
+                await self._repository.add_appeal_bundle(appeal, content, answers, initial_history)
                 await self._repository.commit()
             except IntegrityError:
                 await self._repository.rollback()
@@ -193,10 +220,12 @@ class PublicAppealService:
             response = AppealCreatedResponse(
                 track_number=track_number,
                 status=AppealStatus.NEW,
-                status_text=applicant_status_text(AppealStatus.NEW, payload.applicant_type),
+                status_text=applicant_status_text(
+                    AppealStatus.NEW, applicant_type.code, applicant_type.tone
+                ),
                 crisis_flag=crisis_flag,
                 show_crisis_support=crisis_flag,
-                crisis_support_resources=self._crisis_resources(),
+                crisis_support_resources=crisis_resources,
             )
             return CreatedAppealResult(
                 response=response,
@@ -228,6 +257,8 @@ class PublicAppealService:
         if record is None:
             raise UnauthorizedError("Appeal access is invalid or expired.")
         appeal = record.appeal
+        applicant_type = await self._repository.get_applicant_type_by_code(appeal.applicant_type)
+        tone = applicant_type.tone if applicant_type else None
         history = await self._repository.list_status_history(appeal_id)
         rejection = (
             await self._repository.get_rejection(appeal_id)
@@ -238,16 +269,16 @@ class PublicAppealService:
             applicant_type=appeal.applicant_type,
             category=self._category_public(record.category) if record.category else None,
             status=appeal.status,
-            status_text=applicant_status_text(appeal.status, appeal.applicant_type),
+            status_text=applicant_status_text(appeal.status, appeal.applicant_type, tone),
             crisis_flag=appeal.crisis_flag,
             show_crisis_support=appeal.crisis_flag,
-            crisis_support_resources=self._crisis_resources(),
+            crisis_support_resources=await self._crisis_resources(),
             created_at=appeal.created_at,
             updated_at=appeal.updated_at,
             timeline=[
                 StatusTimelineItem(
                     status=item.to_status,
-                    text=applicant_status_text(item.to_status, appeal.applicant_type),
+                    text=applicant_status_text(item.to_status, appeal.applicant_type, tone),
                     occurred_at=item.created_at,
                 )
                 for item in history
@@ -456,7 +487,19 @@ class PublicAppealService:
         )
         await self._repository.commit()
 
-    def _crisis_resources(self) -> list[CrisisSupportResourcePublic]:
+    async def _crisis_resources(self) -> list[CrisisSupportResourcePublic]:
+        configured = await self._repository.list_active_crisis_support_resources()
+        if configured:
+            return [
+                CrisisSupportResourcePublic(
+                    title=item.title,
+                    message=item.description,
+                    phone=item.phone,
+                    url=item.url,
+                    requires_organizer_verification=False,
+                )
+                for item in configured
+            ]
         return [
             CrisisSupportResourcePublic(
                 title=self._settings.crisis_support_title,
@@ -468,6 +511,97 @@ class PublicAppealService:
                 ),
             )
         ]
+
+    async def _validated_intake_answers(
+        self,
+        answers: dict[str, str | bool | list[str]],
+        *,
+        category_id: UUID | None,
+    ) -> dict[str, str | bool | list[str]]:
+        questions = await self._repository.list_active_intake_questions()
+        mappings = await self._repository.list_question_mappings()
+        mapped = {
+            row.question_id: row
+            for row in mappings
+            if category_id is not None and row.category_id == category_id
+        }
+        allowed = {
+            question.code: (question, mapped.get(question.id))
+            for question in questions
+            if category_id is None or question.id in mapped
+        }
+        if not set(answers).issubset(allowed):
+            raise ValidationError("One or more intake answers are not available.")
+        for code, (question, mapping) in allowed.items():
+            required = (
+                mapping.required_override
+                if mapping is not None and mapping.required_override is not None
+                else question.required
+            )
+            value = answers.get(code)
+            if required and self._answer_is_empty(value):
+                raise ValidationError(f"Answer the required question: {question.label}")
+            if value is not None:
+                self._validate_answer(question, value)
+        return answers
+
+    @staticmethod
+    def _plain_intake_answers(
+        answers: dict[str, Any],
+    ) -> dict[str, str | bool | list[str]]:
+        result: dict[str, str | bool | list[str]] = {}
+        for code, value in answers.items():
+            if isinstance(value, bool):
+                result[code] = value
+            elif isinstance(value, list):
+                cleaned = [item.get_secret_value().strip() for item in value]
+                if cleaned:
+                    result[code] = cleaned
+            else:
+                cleaned = value.get_secret_value().strip()
+                if cleaned:
+                    result[code] = cleaned
+        return result
+
+    @staticmethod
+    def _answer_text_values(
+        answers: dict[str, str | bool | list[str]],
+    ) -> list[str]:
+        values: list[str] = []
+        for value in answers.values():
+            if isinstance(value, str):
+                values.append(value)
+            elif isinstance(value, list):
+                values.extend(value)
+        return values
+
+    @staticmethod
+    def _answer_is_empty(value: str | bool | list[str] | None) -> bool:
+        return value is None or value == "" or value == []
+
+    @staticmethod
+    def _validate_answer(question, value: str | bool | list[str]) -> None:
+        field_type = question.field_type.value
+        if field_type in {"short_text", "long_text"}:
+            maximum = 500 if field_type == "short_text" else 2000
+            if not isinstance(value, str) or len(value) > maximum:
+                raise ValidationError("An intake text answer has an invalid value.")
+            return
+        if field_type == "boolean":
+            if not isinstance(value, bool):
+                raise ValidationError("A boolean intake answer has an invalid value.")
+            return
+        if field_type == "single_choice":
+            if not isinstance(value, str) or value not in question.options_json:
+                raise ValidationError("A choice answer has an invalid option.")
+            return
+        if (
+            not isinstance(value, list)
+            or not value
+            or any(item not in question.options_json for item in value)
+            or len(set(value)) != len(value)
+        ):
+            raise ValidationError("A multiple-choice answer has invalid options.")
 
     @staticmethod
     def _category_public(category: Category) -> CategoryPublic:

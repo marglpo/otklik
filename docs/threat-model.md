@@ -93,6 +93,28 @@ authorization must be enforced even when infrastructure is on a private network.
   exact-role operator selects an eligible replacement; applicants cannot observe refusal or
   reassignment internals.
 
+## Phase 6A/C7/C8 controls
+
+- Exact-role administrator endpoints expose configuration and operational metadata only; they
+  never call content decryption services.
+- One-time staff setup/reset links retain only token digests in PostgreSQL and expire by
+  default after 24 hours. SMTP secrets remain outside the database and API responses.
+- Dynamic form definitions are trusted only after server-side validation; answer values are
+  encrypted using the existing intake envelope.
+- Stuck-case recovery is row-locked, reasoned, allowlisted to active states, routing/capacity
+  checked, historically recorded, and audited without applicant content.
+- Audit browsing and CSV/analytics use explicit metadata projections. Regression coverage
+  places unique sensitive sentinels in content-like records and verifies they do not appear in
+  CSV bytes.
+- Compose demo secrets and credentials are explicitly development-only; production settings
+  reject the built-in cryptographic defaults. Seed scripts refuse production unless explicitly
+  overridden and do not run in normal API startup.
+
+The admin operational reason and safe audit metadata remain a human-input boundary: operators
+and administrators must not copy applicant text into those fields. Database access, backup/key
+separation, SMTP account security, production TLS/reverse-proxy configuration, and retention
+policy still require deployment hardening.
+
 ## MVP limitations
 
 Phase 5 adds expert/applicant dialogue, collaboration, and resolution, but not a full

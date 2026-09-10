@@ -21,11 +21,17 @@ const priorities: Record<AppealPriority, string> = {
   urgent: "Срочный",
 }
 
-const applicantTypes = {
+const applicantTypes: Record<string, string> = {
   student: "Ученик",
   parent: "Родитель",
   teacher: "Педагог",
 } as const
+
+function renderAnswer(value: string | boolean | string[]) {
+  if (Array.isArray(value)) return value.join(", ")
+  if (typeof value === "boolean") return value ? "Да" : "Нет"
+  return value
+}
 
 const statuses: Record<string, string> = {
   new: "Новое",
@@ -190,10 +196,10 @@ export default function OperatorWorkspacePage() {
             <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
               <div className="space-y-5">
                 <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-                  <div className="flex flex-wrap gap-2 text-xs"><span>{applicantTypes[detail.applicant_type]}</span><span>{statuses[detail.status] ?? detail.status}</span><span>ожидает {waiting(detail.waiting_seconds)}</span>{detail.crisis_flag ? <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-900">Требует внимания</span> : null}</div>
+                  <div className="flex flex-wrap gap-2 text-xs"><span>{applicantTypes[detail.applicant_type] ?? detail.applicant_type}</span><span>{statuses[detail.status] ?? detail.status}</span><span>ожидает {waiting(detail.waiting_seconds)}</span>{detail.crisis_flag ? <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-900">Требует внимания</span> : null}</div>
                   <h2 className="mt-5 text-lg font-semibold">Описание ситуации</h2><p className="mt-3 whitespace-pre-wrap leading-7 text-slate-700">{detail.description || "Описание не добавлено."}</p>
                 </section>
-                {Object.keys(detail.intake_answers).length ? <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Дополнительные ответы</h2><dl className="mt-4 space-y-3">{Object.entries(detail.intake_answers).map(([key, value]) => <div key={key}><dt className="text-xs text-slate-500">{intakeLabels[key] ?? key}</dt><dd className="mt-1 text-sm">{value}</dd></div>)}</dl></section> : null}
+                {Object.keys(detail.intake_answers).length ? <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Дополнительные ответы</h2><dl className="mt-4 space-y-3">{Object.entries(detail.intake_answers).map(([key, value]) => <div key={key}><dt className="text-xs text-slate-500">{intakeLabels[key] ?? key}</dt><dd className="mt-1 text-sm">{renderAnswer(value)}</dd></div>)}</dl></section> : null}
                 {detail.return_explanations.length ? <section className="rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200"><h2 className="font-semibold">Почему рекомендации не помогли</h2>{detail.return_explanations.map((item) => <p key={item.id} className="mt-3 whitespace-pre-wrap text-sm">Возврат {item.return_number}: {item.body}</p>)}</section> : null}
                 <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-semibold">Вложения</h2><div className="mt-3 flex flex-wrap gap-2">{detail.attachments.length ? detail.attachments.map((item, index) => <Button key={item.id} variant="outline" onClick={() => openAttachment(item.id)}>Открыть изображение {index + 1}</Button>) : <p className="text-sm text-slate-500">Вложений нет.</p>}</div></section>
               </div>
@@ -225,5 +231,5 @@ export default function OperatorWorkspacePage() {
 
 function QueueBlock({ title, items, selectedId, onOpen }: { title: string; items: OperatorQueue["items"]; selectedId?: string; onOpen: (id: string) => Promise<void> }) {
   if (!items.length) return null
-  return <section className="space-y-2"><h2 className="text-sm font-semibold text-slate-600">{title}</h2>{items.map((item) => <button key={item.id} type="button" onClick={() => void onOpen(item.id)} className={`w-full rounded-xl p-4 text-left ring-1 ${selectedId === item.id ? "bg-teal-50 ring-teal-500" : "bg-white ring-slate-200"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium">{item.category?.name ?? "Категория не выбрана"}</span><span className="text-xs text-slate-500">{waiting(item.waiting_seconds)}</span></div><div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600"><span>{applicantTypes[item.applicant_type]}</span><span>{statuses[item.status] ?? item.status}</span><span>{priorities[item.priority]}</span>{item.is_overdue ? <span className="text-rose-700">Просрочено</span> : null}</div></button>)}</section>
+  return <section className="space-y-2"><h2 className="text-sm font-semibold text-slate-600">{title}</h2>{items.map((item) => <button key={item.id} type="button" onClick={() => void onOpen(item.id)} className={`w-full rounded-xl p-4 text-left ring-1 ${selectedId === item.id ? "bg-teal-50 ring-teal-500" : "bg-white ring-slate-200"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium">{item.category?.name ?? "Категория не выбрана"}</span><span className="text-xs text-slate-500">{waiting(item.waiting_seconds)}</span></div><div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600"><span>{applicantTypes[item.applicant_type] ?? item.applicant_type}</span><span>{statuses[item.status] ?? item.status}</span><span>{priorities[item.priority]}</span>{item.is_overdue ? <span className="text-rose-700">Просрочено</span> : null}</div></button>)}</section>
 }

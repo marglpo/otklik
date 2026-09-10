@@ -13,9 +13,13 @@ from app.db.models import (
     AppealParticipant,
     AppealRejection,
     AppealReturnExplanation,
+    ApplicantTypeConfig,
     Attachment,
     Category,
+    CategoryIntakeQuestion,
     CrisisContact,
+    CrisisSupportResource,
+    IntakeQuestion,
     StaffComplaint,
     StatusHistory,
 )
@@ -40,6 +44,56 @@ class PublicAppealRepository:
             .order_by(Category.sort_order, Category.name)
         )
         return list(result)
+
+    async def list_active_applicant_types(self) -> list[ApplicantTypeConfig]:
+        return list(
+            await self._session.scalars(
+                select(ApplicantTypeConfig)
+                .where(ApplicantTypeConfig.is_active.is_(True))
+                .order_by(ApplicantTypeConfig.sort_order, ApplicantTypeConfig.label)
+            )
+        )
+
+    async def get_active_applicant_type(self, code: str) -> ApplicantTypeConfig | None:
+        return await self._session.scalar(
+            select(ApplicantTypeConfig).where(
+                ApplicantTypeConfig.code == code,
+                ApplicantTypeConfig.is_active.is_(True),
+            )
+        )
+
+    async def get_applicant_type_by_code(self, code: str) -> ApplicantTypeConfig | None:
+        return await self._session.scalar(
+            select(ApplicantTypeConfig).where(ApplicantTypeConfig.code == code)
+        )
+
+    async def list_active_intake_questions(self) -> list[IntakeQuestion]:
+        return list(
+            await self._session.scalars(
+                select(IntakeQuestion)
+                .where(IntakeQuestion.is_active.is_(True))
+                .order_by(IntakeQuestion.sort_order, IntakeQuestion.label)
+            )
+        )
+
+    async def list_question_mappings(self) -> list[CategoryIntakeQuestion]:
+        return list(
+            await self._session.scalars(
+                select(CategoryIntakeQuestion).order_by(
+                    CategoryIntakeQuestion.category_id,
+                    CategoryIntakeQuestion.sort_order,
+                )
+            )
+        )
+
+    async def list_active_crisis_support_resources(self) -> list[CrisisSupportResource]:
+        return list(
+            await self._session.scalars(
+                select(CrisisSupportResource)
+                .where(CrisisSupportResource.is_active.is_(True))
+                .order_by(CrisisSupportResource.sort_order, CrisisSupportResource.title)
+            )
+        )
 
     async def get_category(self, category_id: UUID) -> Category | None:
         return await self._session.get(Category, category_id)

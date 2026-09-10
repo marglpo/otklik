@@ -26,13 +26,17 @@ class StaffUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "staff_users"
     __table_args__ = (
         UniqueConstraint("login", name="staff_users_login"),
+        CheckConstraint("login = lower(btrim(login))", name="staff_users_login_normalized"),
         CheckConstraint(
-            "login = lower(btrim(login))", name="staff_users_login_normalized"
+            "email IS NULL OR email = lower(btrim(email))",
+            name="staff_users_email_normalized",
         ),
+        Index("uq_staff_users_email", "email", unique=True),
     )
 
     login: Mapped[str] = mapped_column(String(100), nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(512))
+    email: Mapped[str | None] = mapped_column(String(320))
     role: Mapped[StaffRole] = mapped_column(
         string_enum(StaffRole, name="staff_role"), nullable=False
     )
@@ -40,14 +44,13 @@ class StaffUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=True, server_default=text("true")
     )
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ExpertProfile(Base):
     __tablename__ = "expert_profiles"
     __table_args__ = (
-        CheckConstraint(
-            "max_active_appeals > 0", name="expert_profiles_positive_capacity"
-        ),
+        CheckConstraint("max_active_appeals > 0", name="expert_profiles_positive_capacity"),
     )
 
     staff_user_id: Mapped[UUID] = mapped_column(
@@ -56,14 +59,13 @@ class ExpertProfile(Base):
     max_active_appeals: Mapped[int] = mapped_column(
         Integer, nullable=False, default=10, server_default=text("10")
     )
+    public_specialist_label: Mapped[str | None] = mapped_column(String(120))
 
 
 class ExpertGroupMembership(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "expert_group_memberships"
     __table_args__ = (
-        UniqueConstraint(
-            "expert_id", "specialist_group_id", name="expert_group_memberships_pair"
-        ),
+        UniqueConstraint("expert_id", "specialist_group_id", name="expert_group_memberships_pair"),
     )
 
     expert_id: Mapped[UUID] = mapped_column(
