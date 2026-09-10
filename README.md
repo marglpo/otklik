@@ -1,8 +1,7 @@
 # Otklik
 
 Otklik is a privacy-first anonymous case-management platform for trusted appeals. The
-repository is currently at the **hackathon MVP through administration (C7) and metadata-only
-analytics (C8)**. Anonymous
+repository is currently at the Anonymous
 creation and status access, staff authentication, operator triage, persistent crisis rules,
 expert/applicant dialogue, collaboration, and encrypted image handling are implemented. The
 configuration workspace, audit viewer, metadata analytics, and privacy-safe CSV export are
